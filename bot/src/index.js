@@ -57,6 +57,7 @@ async function registerSlashCommands(commandData) {
 }
 
 (async () => {
+  startHealthServer(); // najpierw otwieramy port - Render skanuje go od razu po starcie procesu
   const commandData = loadCommands();
   loadEvents();
   await client.login(process.env.DISCORD_TOKEN);
