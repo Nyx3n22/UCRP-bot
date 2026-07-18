@@ -1,0 +1,22 @@
+# Zależności - za duże i niepotrzebne w repo, każdy odtworzy je przez `npm install`
+node_modules/
+
+# SEKRETY - nigdy nie wrzucamy tokenów/haseł na GitHub
+.env
+.env.local
+.env.*.local
+
+# Next.js build output
+.next/
+out/
+
+# Logi
+npm-debug.log*
+*.log
+
+# System
+.DS_Store
+Thumbs.db
+
+# Prisma - migracje ZOSTAJĄ w repo (to kod, nie sekret), ale nie generowany klient
+**/node_modules/.prisma/

@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  background-color: #12141c;
+  background-image:
+    radial-gradient(circle at 20% -10%, rgba(201, 161, 90, 0.08), transparent 40%),
+    radial-gradient(circle at 90% 10%, rgba(122, 31, 61, 0.10), transparent 45%);
+  color: #efe8d8;
+}
+
+::selection {
+  background: #c9a15a;
+  color: #12141c;
+}
+
+.card {
+  background-color: #1b1e2b;
+  border: 1px solid #2c3044;
+  border-radius: 4px;
+}
+
+.label-eyebrow {
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  color: #c9a15a;
+}
+
+input, textarea, select {
+  background-color: #12141c;
+  border: 1px solid #2c3044;
+  color: #efe8d8;
+  border-radius: 3px;
+  padding: 0.5rem 0.75rem;
+}
+
+input:focus, textarea:focus, select:focus {
+  outline: 2px solid #c9a15a;
+  outline-offset: 1px;
+}
+
+button.btn-primary {
+  background-color: #c9a15a;
+  color: #12141c;
+  font-weight: 600;
+  border-radius: 3px;
+  padding: 0.5rem 1rem;
+}
+
+button.btn-primary:hover {
+  background-color: #d9b26e;
+}
+
+button.btn-secondary {
+  background-color: transparent;
+  border: 1px solid #2c3044;
+  color: #efe8d8;
+  border-radius: 3px;
+  padding: 0.5rem 1rem;
+}
+
+button.btn-danger {
+  background-color: #7a1f3d;
+  color: #efe8d8;
+  border-radius: 3px;
+  padding: 0.5rem 1rem;
+}
+
+table.uwrp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+table.uwrp-table th {
+  text-align: left;
+  border-bottom: 1px solid #2c3044;
+  padding: 0.6rem 0.75rem;
+  color: #c9a15a;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+}
+
+table.uwrp-table td {
+  border-bottom: 1px solid #21243133;
+  padding: 0.6rem 0.75rem;
+}
+
+table.uwrp-table tr:hover td {
+  background-color: #21243b;
+}

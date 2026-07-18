@@ -1,0 +1,423 @@
+// ==========================================================
+//  Uniwersytet Warszawski RP — schema.prisma
+//  Baza: PostgreSQL (relacyjna — wybrana ze względu na silne
+//  powiązania Character <-> Faculty <-> Grade <-> Exam)
+// ==========================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- RDZEŃ: UŻYTKOWNICY, ROLE, KONFIG ----------
+
+model DiscordUser {
+  id            String        @id // discordId
+  robloxId      String?       @unique
+  robloxUsername String?
+  verifiedAt    DateTime?
+  aiCredits     Float         @default(2)
+  aiCreditsResetAt DateTime   @default(now())
+  character     Character?
+  aiUsageLogs   AiUsageLog[]
+  ticketsOwned  Ticket[]      @relation("TicketOwner")
+  grades        Grade[]
+  punishments   Punishment[]
+  examAnswers   ExamAnswer[]
+  createdAt     DateTime      @default(now())
+}
+
+model RoleBinding {
+  id             String  @id @default(cuid())
+  discordRoleId  String  @unique
+  permissionKey  String  // np. MANAGE_EXAMS, DONATE_UNLIMITED_AI, MODERATE
+  label          String  // czytelna nazwa z Dashboardu
+  facultyId      String? // jeśli rola jest przypisana do konkretnego wydziału (kadra)
+  faculty        Faculty? @relation(fields: [facultyId], references: [id])
+}
+
+model ChannelBinding {
+  id         String @id @default(cuid())
+  key        String @unique // np. LOG_MOD, LOG_AI, APPLICATIONS_STUDENT, VERIFICATION, ANNOUNCEMENTS, TICKET_TRANSCRIPTS
+  channelId  String
+}
+
+// ---------- MODUŁ AI ----------
+
+model AiConfig {
+  id                String   @id @default("singleton")
+  provider          String   @default("huggingface") // WYŁĄCZNIE Hugging Face — pole zostaje dla przyszłej rozbudowy, ale kod bota nie obsługuje innych wartości
+  apiKeyEncrypted   String   // token Hugging Face (hf_...), szyfrowany AES-256-GCM
+  chatModel         String   @default("meta-llama/Llama-3.1-8B-Instruct") // model do bramki AI (chat completions), edytowalny w Dashboardzie
+  automodModel      String   @default("unitary/toxic-bert") // model klasyfikacyjny do automodu (text-classification)
+  automodThreshold  Float    @default(0.7) // próg pewności (0-1), powyżej którego wiadomość jest usuwana
+  allowedChannelIds String[] // bramka AI tylko na tych kanałach
+  automodEnabled    Boolean  @default(true)
+  updatedAt         DateTime @updatedAt
+}
+
+model AiPricingTier {
+  id          String @id @default(cuid())
+  minChars    Int
+  maxChars    Int?   // null = bez górnej granicy
+  creditCost  Float
+}
+
+model AiUsageLog {
+  id         String      @id @default(cuid())
+  user       DiscordUser @relation(fields: [userId], references: [id])
+  userId     String
+  channelId  String
+  charCount  Int
+  creditCost Float
+  unlimited  Boolean     @default(false) // true jeśli rola donate pokryła koszt
+  createdAt  DateTime    @default(now())
+}
+
+// ---------- POSTACIE / RP ----------
+
+model Character {
+  id               String      @id @default(cuid())
+  user             DiscordUser @relation(fields: [userId], references: [id])
+  userId           String      @unique
+  firstNameIC      String
+  lastNameIC       String
+  birthDateIC      DateTime
+  genderIC         Gender
+  pesel            String      @unique
+  yearOfStudy      Int?        @default(1)
+  salaryIC         Int         @default(0)
+  facultyId        String?
+  faculty          Faculty?    @relation(fields: [facultyId], references: [id])
+  scientificTitle  String?     // sync z RoleBinding tytułów naukowych
+  albumNumber      String      @unique @default(cuid())
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+}
+
+enum Gender {
+  MALE
+  FEMALE
+}
+
+model Faculty {
+  id           String        @id @default(cuid())
+  name         String        @unique
+  characters   Character[]
+  subjects     Subject[]
+  roleBindings RoleBinding[]
+}
+
+// ---------- SYLABUSY / ECTS ----------
+
+model Subject {
+  id         String     @id @default(cuid())
+  name       String
+  facultyId  String
+  faculty    Faculty    @relation(fields: [facultyId], references: [id])
+  ectsPoints Int        @default(0)
+  syllabus   Syllabus?
+  questions  ExamQuestion[]
+  grades     Grade[]
+
+  @@unique([name, facultyId])
+}
+
+model Syllabus {
+  id         String   @id @default(cuid())
+  subjectId  String   @unique
+  subject    Subject  @relation(fields: [subjectId], references: [id])
+  content    String   @db.Text // markdown edytowany z Dashboardu
+  updatedAt  DateTime @updatedAt
+}
+
+// ---------- EGZAMINY (DM) ----------
+
+model ExamQuestion {
+  id         String   @id @default(cuid())
+  subjectId  String
+  subject    Subject  @relation(fields: [subjectId], references: [id])
+  topic      String
+  content    String   @db.Text
+  order      Int      @default(0)
+}
+
+model ExamSession {
+  id          String        @id @default(cuid())
+  subjectId   String
+  topic       String
+  channelId   String        // kanał wydziału, na którym wywołano start
+  resultsChannelId String
+  startedById String
+  status      ExamStatus    @default(ONGOING)
+  createdAt   DateTime      @default(now())
+  closedAt    DateTime?
+  answers     ExamAnswer[]
+}
+
+enum ExamStatus {
+  ONGOING
+  CLOSED
+}
+
+model ExamAnswer {
+  id         String      @id @default(cuid())
+  session    ExamSession @relation(fields: [sessionId], references: [id])
+  sessionId  String
+  user       DiscordUser @relation(fields: [userId], references: [id])
+  userId     String
+  questionId String
+  answer     String      @db.Text
+  answeredAt DateTime    @default(now())
+
+  @@unique([sessionId, userId, questionId])
+}
+
+// ---------- USOS / OCENY ----------
+
+model Grade {
+  id         String      @id @default(cuid())
+  user       DiscordUser @relation(fields: [userId], references: [id])
+  userId     String
+  subjectId  String
+  subject    Subject     @relation(fields: [subjectId], references: [id])
+  value      Float       // skala 2.0 - 5.0
+  issuedById String
+  createdAt  DateTime    @default(now())
+}
+
+// ---------- FREKWENCJA ----------
+
+model AttendanceLog {
+  id          String   @id @default(cuid())
+  userId      String
+  voiceChannelId String
+  joinedAt    DateTime
+  leftAt      DateTime?
+  durationSec Int?
+}
+
+// ---------- STYPENDIA / BIBLIOTEKA / KOŁA / AKADEMIKI / PRACE DYPLOMOWE ----------
+
+model Scholarship {
+  id        String   @id @default(cuid())
+  userId    String
+  amountIC  Int
+  gpaAtIssue Float
+  issuedAt  DateTime @default(now())
+}
+
+model LibraryResource {
+  id          String    @id @default(cuid())
+  title       String
+  totalCopies Int       @default(1)
+  loans       LibraryLoan[]
+}
+
+model LibraryLoan {
+  id          String          @id @default(cuid())
+  resourceId  String
+  resource    LibraryResource @relation(fields: [resourceId], references: [id])
+  userId      String
+  borrowedAt  DateTime        @default(now())
+  dueAt       DateTime
+  returnedAt  DateTime?
+}
+
+model ScientificCircle {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  leaderId  String
+  budgetIC  Int      @default(0)
+  members   ScientificCircleMember[]
+}
+
+model ScientificCircleMember {
+  id        String            @id @default(cuid())
+  circleId  String
+  circle    ScientificCircle  @relation(fields: [circleId], references: [id])
+  userId    String
+
+  @@unique([circleId, userId])
+}
+
+model ThesisRegistration {
+  id           String   @id @default(cuid())
+  studentId    String
+  supervisorId String
+  title        String
+  status       ThesisStatus @default(IN_PROGRESS)
+  updatedAt    DateTime @updatedAt
+}
+
+enum ThesisStatus {
+  IN_PROGRESS
+  UNDER_REVIEW
+  ACCEPTED
+  REJECTED
+}
+
+model DormitoryRoom {
+  id         String   @id @default(cuid())
+  roomNumber String   @unique
+  rentIC     Int
+  residents  DormitoryResident[]
+}
+
+model DormitoryResident {
+  id       String        @id @default(cuid())
+  roomId   String
+  room     DormitoryRoom @relation(fields: [roomId], references: [id])
+  userId   String
+  movedInAt DateTime     @default(now())
+}
+
+model ConditionalRetake {
+  id         String   @id @default(cuid())
+  userId     String
+  subjectId  String
+  feeIC      Int
+  reportedAt DateTime @default(now())
+}
+
+// ---------- KARY DYSCYPLINARNE ----------
+
+model Punishment {
+  id         String   @id @default(cuid())
+  user       DiscordUser @relation(fields: [userId], references: [id])
+  userId     String
+  issuedById String
+  reason     String
+  severity   PunishmentSeverity
+  expiresAt  DateTime?
+  createdAt  DateTime @default(now())
+}
+
+enum PunishmentSeverity {
+  UPOMNIENIE
+  NAGANA
+  ZAWIESZENIE
+  WYDALENIE // trigger: automatyczne zabranie roli Studenta
+}
+
+// ---------- TICKETY ----------
+
+model Ticket {
+  id           String        @id @default(cuid())
+  owner        DiscordUser   @relation("TicketOwner", fields: [ownerId], references: [id])
+  ownerId      String
+  categoryKey  String
+  channelId    String
+  assignedToId String?
+  status       TicketStatus  @default(OPEN)
+  transcriptHtml String?     @db.Text
+  createdAt    DateTime      @default(now())
+  closedAt     DateTime?
+}
+
+enum TicketStatus {
+  OPEN
+  CLAIMED
+  CLOSED
+}
+
+// ---------- PODANIA REKRUTACYJNE ----------
+
+model Application {
+  id         String   @id @default(cuid())
+  userId     String
+  type       ApplicationType
+  answers    Json
+  status     ApplicationStatus @default(PENDING)
+  reviewedById String?
+  createdAt  DateTime @default(now())
+}
+
+enum ApplicationType {
+  STUDENT
+  WYKLADOWCA
+  ADMINISTRACJA
+}
+
+enum ApplicationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+// ---------- INTEGRACJE SOCIAL MEDIA ----------
+
+model SocialMediaConfig {
+  id                              String   @id @default("singleton")
+  twitchClientId                  String?
+  twitchClientSecretEncrypted     String?
+  youtubeApiKeyEncrypted          String?
+  instagramAccessTokenEncrypted   String? // token Graph API dla konta Business/Creator
+  twitterBearerTokenEncrypted     String? // opcjonalne — wymaga płatnego tieru X API v2
+  pollIntervalMinutes             Int      @default(5)
+  updatedAt                       DateTime @updatedAt
+}
+
+model SocialMediaSubscription {
+  id               String         @id @default(cuid())
+  platform         SocialPlatform
+  externalHandle   String         // nazwa kanału Twitch, ID kanału YouTube, IG user ID, @handle X/TikTok
+  discordChannelId String
+  lastSeenId       String?
+  enabled          Boolean        @default(true)
+  createdAt        DateTime       @default(now())
+
+  @@unique([platform, externalHandle, discordChannelId])
+}
+
+enum SocialPlatform {
+  TWITCH
+  YOUTUBE
+  INSTAGRAM
+  TWITTER
+  TIKTOK
+}
+
+// ---------- REACTION ROLE / AUTOROLE ----------
+
+model ReactionRoleGroup {
+  id          String               @id @default(cuid())
+  key         String               @unique // np. "wydzialy", "powiadomienia" - używane w /autorole panel [grupa]
+  title       String
+  description String?              @db.Text
+  options     ReactionRoleOption[]
+  createdAt   DateTime             @default(now())
+}
+
+model ReactionRoleOption {
+  id            String            @id @default(cuid())
+  groupId       String
+  group         ReactionRoleGroup @relation(fields: [groupId], references: [id])
+  discordRoleId String
+  label         String
+  emoji         String?
+  style         ButtonStyleOption @default(SECONDARY)
+  order         Int               @default(0)
+}
+
+enum ButtonStyleOption {
+  PRIMARY
+  SECONDARY
+  SUCCESS
+  DANGER
+}
+
+// ---------- LOGI ----------
+
+model ActionLog {
+  id        String   @id @default(cuid())
+  actorId   String
+  action    String
+  targetId  String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+}

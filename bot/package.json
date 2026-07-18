@@ -1,0 +1,22 @@
+{
+  "name": "uwrp-bot",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "prisma:generate": "prisma generate --schema=../prisma/schema.prisma",
+    "prisma:migrate": "prisma migrate dev --schema=../prisma/schema.prisma"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.20.0",
+    "@napi-rs/canvas": "^0.1.55",
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4",
+    "prisma": "^5.20.0"
+  }
+}
