@@ -7,6 +7,7 @@ const fs = require("fs");
 const path = require("path");
 const { Client, GatewayIntentBits, Partials, Collection, REST, Routes } = require("discord.js");
 const { startSocialMediaScheduler } = require("./scheduler/socialMediaScheduler");
+const { startHealthServer } = require("./healthServer");
 
 const client = new Client({
   intents: [
