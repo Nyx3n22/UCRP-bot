@@ -18,23 +18,29 @@ const client = new Client({
     GatewayIntentBits.DirectMessages,
     GatewayIntentBits.GuildVoiceStates,
   ],
-  partials: [Partials.Channel, Partials.Message], // wymagane dla DM (kolektor odpowiedzi w egzaminie)
+  partials: [Partials.Channel, Partials.Message],
 });
 
 client.commands = new Collection();
 
 function loadCommands() {
   const commandsPath = path.join(__dirname, "commands");
+  if (!fs.existsSync(commandsPath)) return [];
+
   const categories = fs.readdirSync(commandsPath);
   const commandData = [];
 
   for (const category of categories) {
     const categoryPath = path.join(commandsPath, category);
+    if (!fs.statSync(categoryPath).isDirectory()) continue;
+
     const files = fs.readdirSync(categoryPath).filter((f) => f.endsWith(".js"));
     for (const file of files) {
       const command = require(path.join(categoryPath, file));
-      client.commands.set(command.data.name, command);
-      commandData.push(command.data.toJSON());
+      if ("data" in command && "execute" in command) {
+        client.commands.set(command.data.name, command);
+        commandData.push(command.data.toJSON());
+      }
     }
   }
   return commandData;
@@ -42,10 +48,25 @@ function loadCommands() {
 
 function loadEvents() {
   const eventsPath = path.join(__dirname, "events");
+  if (!fs.existsSync(eventsPath)) return;
+
   const files = fs.readdirSync(eventsPath).filter((f) => f.endsWith(".js"));
   for (const file of files) {
     const event = require(path.join(eventsPath, file));
-    client.on(event.name, (...args) => event.execute(...args));
+    console.log(`🔌 Załadowano event: ${event.name}`);
+
+    if (event.once) {
+      client.once(event.name, (...args) => event.execute(...args, client));
+    } else {
+      // Owijamy w try...catch oraz Promise, aby wyłapać błędy z async execute()
+      client.on(event.name, async (...args) => {
+        try {
+          await event.execute(...args, client);
+        } catch (error) {
+          console.error(`❌ Błąd w evencie [${event.name}]:`, error);
+        }
+      });
+    }
   }
 }
 
@@ -58,10 +79,19 @@ async function registerSlashCommands(commandData) {
 }
 
 (async () => {
-  startHealthServer(); // najpierw otwieramy port - Render skanuje go od razu po starcie procesu
+  startHealthServer();
   const commandData = loadCommands();
   loadEvents();
   await client.login(process.env.DISCORD_TOKEN);
   await registerSlashCommands(commandData);
   startSocialMediaScheduler(client);
 })();
+
+// Globalne przechwytywanie błędów, żeby Render zawsze pokazywał logi zamiast milczeć
+process.on("unhandledRejection", (reason) => {
+  console.error("❌ Niezłapany błąd (Unhandled Rejection):", reason);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("❌ Krytyczny wyjątek (Uncaught Exception):", error);
+});
