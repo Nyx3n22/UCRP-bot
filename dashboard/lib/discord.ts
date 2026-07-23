@@ -9,18 +9,30 @@
 const DISCORD_API = "https://discord.com/api/v10";
 
 export async function fetchGuildMemberRoleIds(discordUserId: string): Promise<string[]> {
-  const res = await fetch(
-    `${DISCORD_API}/guilds/${process.env.GUILD_ID}/members/${discordUserId}`,
-    {
+  const { roleIds } = await fetchGuildMemberRoleIdsDebug(discordUserId);
+  return roleIds;
+}
+
+/** Wersja z pełną diagnostyką - używana na stronie /unauthorized, żeby było widać PRZYCZYNĘ, nie tylko efekt */
+export async function fetchGuildMemberRoleIdsDebug(
+  discordUserId: string
+): Promise<{ roleIds: string[]; status: number | "network_error"; guildId: string | undefined; hasToken: boolean }> {
+  const guildId = process.env.GUILD_ID;
+  const hasToken = Boolean(process.env.DISCORD_BOT_TOKEN);
+
+  try {
+    const res = await fetch(`${DISCORD_API}/guilds/${guildId}/members/${discordUserId}`, {
       headers: { Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}` },
       cache: "no-store",
-    }
-  );
+    });
 
-  if (!res.ok) return [];
+    if (!res.ok) return { roleIds: [], status: res.status, guildId, hasToken };
 
-  const data = await res.json();
-  return (data.roles as string[]) ?? [];
+    const data = await res.json();
+    return { roleIds: (data.roles as string[]) ?? [], status: res.status, guildId, hasToken };
+  } catch {
+    return { roleIds: [], status: "network_error", guildId, hasToken };
+  }
 }
 
 export type DiscordRole = { id: string; name: string; color: number; position: number };

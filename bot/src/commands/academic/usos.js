@@ -43,6 +43,11 @@ module.exports = {
   data: new SlashCommandBuilder().setName("usos").setDescription("Otwiera panel USOS dopasowany do Twojej roli"),
 
   async execute(interaction) {
+    // Neon (darmowy plan) usypia bazę przy bezczynności - jej "obudzenie" bywa
+    // wolniejsze niż 3-sekundowy limit Discorda na pierwszą odpowiedź. Odkładamy
+    // odpowiedź natychmiast, żeby zyskać do 15 minut zamiast 3 sekund.
+    await interaction.deferReply({ ephemeral: true });
+
     const tier = await resolveTier(interaction.member);
 
     if (tier === "student") return this._studentPanel(interaction);
@@ -81,7 +86,7 @@ module.exports = {
       new ButtonBuilder().setCustomId("usos_panel:napisz").setLabel("Napisz do wykładowcy").setStyle(ButtonStyle.Primary)
     );
 
-    return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+    return interaction.editReply({ embeds: [embed], components: [row] });
   },
 
   async _staffPanel(interaction, tier) {
@@ -109,7 +114,7 @@ module.exports = {
       rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
     }
 
-    return interaction.reply({ embeds: [embed], components: rows, ephemeral: true });
+    return interaction.editReply({ embeds: [embed], components: rows });
   },
 
   // ---------- Modale otwierane z przycisków (wywoływane z interactionCreate.js) ----------
