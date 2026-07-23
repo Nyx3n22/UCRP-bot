@@ -29,6 +29,8 @@ const PERMISSION_KEYS = {
   STUDENT_ROLE: "STUDENT_ROLE",
   WYKLADOWCA_ROLE: "WYKLADOWCA_ROLE",
   ADMINISTRACJA_ROLE: "ADMINISTRACJA_ROLE",
+  VERIFIED_ROLE: "VERIFIED_ROLE",
+  RECTORATE_ACCESS: "RECTORATE_ACCESS", // Rektor/Prorektor - audyt całej uczelni, nie tylko jednego wydziału
 };
 
 let cache = { bindings: [], fetchedAt: 0 };

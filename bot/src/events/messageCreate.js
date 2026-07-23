@@ -42,7 +42,7 @@ module.exports = {
         message.content
       );
 
-      const reply = await generateAiReply(message.content, config);
+      const reply = await generateAiReply(message.content, config, { isPremium: unlimited });
       await message.reply(reply);
 
       if (!unlimited) {

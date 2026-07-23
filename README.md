@@ -23,7 +23,7 @@ uwrp-bot/
 │   │   │   ├── academic/
 │   │   │   │   ├── sylabus.js       # /sylabus
 │   │   │   │   ├── egzamin.js       # /egzamin start|stop|wyniki
-│   │   │   │   └── usos.js          # /usos ocen (kadra)
+│   │   │   │   └── usos.js          # /usos - panel dopasowany do roli (bez podkomend)
 │   │   │   └── admin/
 │   │   │       ├── moderacja.js     # ban/kick/mute/clear
 │   │   │       └── ogloszenie.js
@@ -106,25 +106,35 @@ Token Hugging Face (`hf_...`) jest wpisywany wyłącznie w Dashboardzie i trzyma
 
 ## Status 15 mechanik uczelnianych
 
-Wszystkie 15 systemów z sekcji 6 specyfikacji ma teraz komplet: model w `prisma/schema.prisma`, serwis w `bot/src/services/`, i komendę w `bot/src/commands/academic/` (lub `admin/` gdzie dotyczy Dziekanatu).
+Wszystkie systemy z sekcji 6 specyfikacji poza Akademikami (usuniętymi na życzenie — nie wnosiły nic do rozgrywki) mają komplet: model w `prisma/schema.prisma`, serwis w `bot/src/services/`, i komendę.
 
 | # | Mechanika | Serwis | Komenda |
 |---|---|---|---|
 | 1 | Sylabusy | — (odczyt bezpośredni) | `/sylabus` |
 | 2 | Egzamin DM | `examService.js` | `/egzamin start` |
-| 3 | Wirtualny Indeks (USOS) | — (odczyt bezpośredni) | `/usos ocen`, `/usos indeks` |
+| 3 | Wirtualny Indeks (USOS) | — (odczyt bezpośredni) | `/usos` — **jedna komenda, zero podkomend**, panel dopasowany do roli (student/wykładowca/władze uczelni) przez przyciski i modale |
 | 4 | Punkty ECTS | — (agregacja w komendzie) | `/ects` |
 | 5 | Prefixy naukowe | `roleSyncService` (event `guildMemberUpdate`) | automatyczne |
 | 6 | Legitymacja studencka | — (Canvas w komendzie) | `/legitymacja` |
-| 7 | Rejestrator frekwencji | `attendanceService.js` + event `voiceStateUpdate` | `/frekwencja` |
+| 7 | Frekwencja | — (ręczne wpisy, brak śledzenia głosowego) | wbudowana w panel `/usos` (przycisk "Wpisz frekwencję") |
 | 8 | System stypendialny | `scholarshipService.js` | `/stypendium wyplac`, `/stypendium historia` |
 | 9 | Biblioteka akademicka | `libraryService.js` | `/biblioteka wypozycz\|oddaj\|moje` |
 | 10 | Zaliczenia warunkowe | `retakeService.js` | `/warunek zglos` |
 | 11 | Koła naukowe | `circleService.js` | `/kolo utworz\|dolacz\|opusc\|budzet\|status` |
 | 12 | Prace dyplomowe | `thesisService.js` | `/praca zarejestruj\|status\|moja` |
-| 13 | Akademiki | `dormitoryService.js` | `/akademik zamieszkaj\|wymelduj\|moj_pokoj\|pobierz_czynsz` |
+| 13 | ~~Akademiki~~ | usunięte | — |
 | 14 | Generator Dziekanatu | modal w `commands/admin/dziekanat.js`, obsługa w `interactionCreate.js` | `/dziekanat ogloszenie` |
 | 15 | Kary dyscyplinarne | `punishmentService.js` | `/moderacja kara` |
+
+## Panel `/usos` — architektura
+
+Zamiast podkomend (`/usos ocen`, `/usos indeks`...), `/usos` to jedna komenda bez argumentów. Bot sprawdza uprawnienia wywołującego (`RECTORATE_ACCESS`/`MANAGE_DEANERY` → władze uczelni, `MANAGE_GRADES` → wykładowca, inaczej → student) i pokazuje **inny embed z innymi przyciskami** w zależności od roli:
+
+- **Student**: własne oceny, GPA, frekwencja + przycisk "Napisz do wykładowcy" (wysyła DM)
+- **Wykładowca**: przyciski "Wystaw ocenę" i "Wpisz frekwencję" (oba otwierają Modal)
+- **Władze uczelni**: to co wykładowca + "Zatrudnij"/"Zwolnij" (nadaje/zabiera rolę `WYKLADOWCA_ROLE`/`ADMINISTRACJA_ROLE`/`STUDENT_ROLE` z Dashboardu) i "Wygeneruj raport" (średnie GPA i frekwencja całej uczelni)
+
+Szkoła Doktorska nie ma osobnego kodu — działa jak każdy inny wydział (`Faculty`) z własnymi przedmiotami, ocenami i frekwencją przez ten sam panel.
 
 Uwagi projektowe:
 - Progi i kwoty (opłata warunkowa, minimalne GPA do stypendium, wymagana pula ECTS/rok) mają sensowne wartości domyślne zgodne z realiami akademickimi, ale każda komenda pozwala je nadpisać parametrem — docelowo warto przenieść je do dedykowanych tabel konfiguracyjnych w Dashboardzie (analogicznie do `AiPricingTier`), jeśli mają być globalnie zarządzane bez pamiętania parametrów komendy.
@@ -166,5 +176,5 @@ Konfiguracja subskrypcji (`SocialMediaSubscription`: platforma, handle/ID zewnę
 - `services/ticketService.js` + `commands/admin/ticket.js` — pełny cykl życia ticketu: kanał prywatny → przypisanie → zamknięcie z transkrypcją HTML wysyłaną na skonfigurowany kanał.
 - `services/punishmentService.js` — dziennik kar dyscyplinarnych; severity `WYDALENIE` automatycznie zabiera rolę Studenta (rola wskazana przez `RoleBinding` z kluczem `STUDENT_ROLE`).
 - `commands/admin/moderacja.js` — ban/kick/mute/clear/ogłoszenie/kara w jednej komendzie z podkomendami, każda akcja loguje się do `ActionLog`.
-- `commands/academic/sylabus.js`, `commands/academic/usos.js` (`/usos ocen`, `/indeks`) — realizują mechaniki 1, 3 i częściowo 4 z listy 15 systemów.
+- `commands/academic/sylabus.js`, `commands/academic/usos.js` (`/usos` — panel bez podkomend) — realizują mechaniki 1, 3 i częściowo 4 z listy systemów.
 - `commands/rp/legitymacja.js` — generator legitymacji studenckiej (Canvas) z uproszczonym kodem kreskowym opartym o hash numeru albumu.

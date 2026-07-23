@@ -4,10 +4,14 @@
  * połączenie WebSocket z Discordem, nie odpowiada na żądania jak strona.
  *
  * Ten plik istnieje wyłącznie z powodów hostingowych: darmowy plan Render.com
- * obsługuje tylko "Web Service" (usługi HTTP) za darmo. Wystawiając ten
+ * obsługuje tylko "Web Service" (usługi HTTP) za darmo, nie "Background Worker"
+ * (procesy bez HTTP, potrzebne dla bota, płatne od $7/mies). Wystawiając ten
  * malutki endpoint, Render widzi bota jako zwykłą stronę i wpuszcza go za darmo,
  * a zewnętrzny serwis (UptimeRobot) może go regularnie pingować, żeby Render
  * nie uśpił procesu z powodu braku ruchu.
+ *
+ * To obejście, nie architektura docelowa — jeśli kiedyś przejdziecie na płatny
+ * plan / inny hosting z prawdziwym Background Workerem, ten plik można usunąć.
  */
 
 const http = require("http");

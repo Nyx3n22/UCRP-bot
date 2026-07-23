@@ -1,11 +1,16 @@
 import { prisma } from "@/lib/prisma";
+import { fetchGuildChannels } from "@/lib/discord";
 import { updateAiConfig, upsertPricingTier, deletePricingTier } from "./actions";
 
 export default async function AiModulePage() {
-  const [config, tiers] = await Promise.all([
+  const [config, tiers, channels, unlimitedBindings] = await Promise.all([
     prisma.aiConfig.findUnique({ where: { id: "singleton" } }),
     prisma.aiPricingTier.findMany({ orderBy: { minChars: "asc" } }),
+    fetchGuildChannels(),
+    prisma.roleBinding.findMany({ where: { permissionKey: "DONATE_UNLIMITED_AI" } }),
   ]);
+
+  const allowedIds = config?.allowedChannelIds ?? [];
 
   return (
     <div>
@@ -16,6 +21,18 @@ export default async function AiModulePage() {
         automod przez dedykowany model klasyfikacyjny. Token nigdy nie jest pokazywany po zapisaniu — wpisz nowy tylko
         jeśli chcesz go zmienić.
       </p>
+
+      <div className="card p-4 mb-8 max-w-2xl text-sm">
+        <p className="text-xs text-parchment/50 mb-1">Role z nielimitowanym AI (DONATE_UNLIMITED_AI):</p>
+        {unlimitedBindings.length > 0 ? (
+          <p className="text-brass">{unlimitedBindings.map((b) => b.label).join(", ")}</p>
+        ) : (
+          <p className="text-burgundy">
+            Żadna rola nie ma tego uprawnienia — donatorzy będą tracić kredyty jak zwykli użytkownicy. Dodaj to w
+            zakładce Role.
+          </p>
+        )}
+      </div>
 
       <form action={updateAiConfig} className="card p-6 mb-8 flex flex-col gap-4 max-w-2xl">
         <div className="flex flex-col gap-1">
@@ -34,6 +51,14 @@ export default async function AiModulePage() {
           </div>
         </div>
 
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-parchment/50">
+            Model premium (dla ról z uprawnieniem DONATE_UNLIMITED_AI) — zostaw puste, żeby donate używali tego
+            samego modelu co reszta, tylko bez limitu kredytów
+          </label>
+          <input name="premiumChatModel" defaultValue={config?.premiumChatModel ?? ""} placeholder="np. meta-llama/Llama-3.1-70B-Instruct" />
+        </div>
+
         <div className="grid grid-cols-2 gap-4">
           <div className="flex flex-col gap-1">
             <label className="text-xs text-parchment/50">Próg pewności automodu (0–1)</label>
@@ -46,8 +71,27 @@ export default async function AiModulePage() {
         </div>
 
         <div className="flex flex-col gap-1">
-          <label className="text-xs text-parchment/50">Dozwolone kanały bramki AI (ID po przecinku)</label>
-          <textarea name="allowedChannelIds" rows={2} defaultValue={config?.allowedChannelIds.join(", ") ?? ""} />
+          <label className="text-xs text-parchment/50">
+            Dozwolone kanały bramki AI — zaznacz dokładnie te, na których bot ma odpowiadać (odznaczone = bot
+            ignoruje wiadomości na tym kanale)
+          </label>
+          <div className="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto border border-line rounded p-3">
+            {channels.text.map((c) => (
+              <label key={c.id} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  name="allowedChannelIds"
+                  value={c.id}
+                  defaultChecked={allowedIds.includes(c.id)}
+                  className="w-4 h-4"
+                />
+                #{c.name}
+              </label>
+            ))}
+            {channels.text.length === 0 && (
+              <p className="text-xs text-burgundy col-span-3">Nie udało się pobrać kanałów z Discorda.</p>
+            )}
+          </div>
         </div>
 
         <button type="submit" className="btn-primary self-start">Zapisz konfigurację</button>

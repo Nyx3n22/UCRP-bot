@@ -65,10 +65,11 @@ async function callHfClassification(apiKey, model, text) {
 }
 
 /** Bramka AI — odpowiedź na wiadomość użytkownika na dozwolonym kanale */
-async function generateAiReply(userMessage, aiConfig) {
+async function generateAiReply(userMessage, aiConfig, { isPremium = false } = {}) {
   const apiKey = decrypt(aiConfig.apiKeyEncrypted);
+  const model = isPremium && aiConfig.premiumChatModel ? aiConfig.premiumChatModel : aiConfig.chatModel;
 
-  return callHfChat(apiKey, aiConfig.chatModel, [
+  return callHfChat(apiKey, model, [
     {
       role: "system",
       content:

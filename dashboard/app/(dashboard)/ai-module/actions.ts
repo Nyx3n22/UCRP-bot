@@ -16,13 +16,12 @@ function encrypt(plainText: string) {
 
 export async function updateAiConfig(formData: FormData) {
   const chatModel = String(formData.get("chatModel") ?? "");
+  const premiumChatModelRaw = String(formData.get("premiumChatModel") ?? "").trim();
+  const premiumChatModel = premiumChatModelRaw || null;
   const automodModel = String(formData.get("automodModel") ?? "");
   const automodThreshold = Number(formData.get("automodThreshold") ?? 0.7);
   const automodEnabled = formData.get("automodEnabled") === "on";
-  const allowedChannelIds = String(formData.get("allowedChannelIds") ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const allowedChannelIds = formData.getAll("allowedChannelIds").map(String);
   const newToken = String(formData.get("newToken") ?? "").trim();
 
   const existing = await prisma.aiConfig.findUnique({ where: { id: "singleton" } });
@@ -31,6 +30,7 @@ export async function updateAiConfig(formData: FormData) {
     where: { id: "singleton" },
     update: {
       chatModel,
+      premiumChatModel,
       automodModel,
       automodThreshold,
       automodEnabled,
@@ -40,6 +40,7 @@ export async function updateAiConfig(formData: FormData) {
     create: {
       id: "singleton",
       chatModel,
+      premiumChatModel,
       automodModel,
       automodThreshold,
       automodEnabled,

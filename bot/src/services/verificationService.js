@@ -12,7 +12,6 @@ const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = req
 const prisma = require("../lib/prisma");
 const { generatePesel } = require("./peselGenerator");
 const { generateCaptcha } = require("../utils/captcha");
-const { getChannelId } = require("../config/channels");
 
 const ROBLOX_PROVIDER = process.env.ROBLOX_VERIFY_PROVIDER || "rover"; // "rover" | "bloxlink" | "custom"
 
@@ -132,7 +131,8 @@ class VerificationService {
       },
     });
 
-    const verifiedRoleId = await getChannelId("VERIFIED_ROLE"); // ChannelBinding reużyty jako generyczny key-value
+    const { getRoleIdForPermission } = require("../config/roles");
+    const verifiedRoleId = await getRoleIdForPermission("VERIFIED_ROLE");
     const member = await interaction.guild.members.fetch(interaction.user.id);
     if (verifiedRoleId) await member.roles.add(verifiedRoleId).catch(() => null);
 

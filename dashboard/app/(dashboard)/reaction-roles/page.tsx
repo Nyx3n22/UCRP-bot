@@ -1,13 +1,19 @@
 import { prisma } from "@/lib/prisma";
+import { fetchGuildRoles } from "@/lib/discord";
 import { createGroup, addOption, deleteOption, deleteGroup } from "./actions";
 
 const STYLES = ["PRIMARY", "SECONDARY", "SUCCESS", "DANGER"];
 
 export default async function ReactionRolesPage() {
-  const groups = await prisma.reactionRoleGroup.findMany({
-    include: { options: { orderBy: { order: "asc" } } },
-    orderBy: { createdAt: "asc" },
-  });
+  const [groups, roles] = await Promise.all([
+    prisma.reactionRoleGroup.findMany({
+      include: { options: { orderBy: { order: "asc" } } },
+      orderBy: { createdAt: "asc" },
+    }),
+    fetchGuildRoles(),
+  ]);
+
+  const roleNameById = new Map(roles.map((r) => [r.id, r.name]));
 
   return (
     <div>
@@ -59,7 +65,7 @@ export default async function ReactionRolesPage() {
                   <tr key={o.id}>
                     <td>{o.order}</td>
                     <td>{o.label}</td>
-                    <td className="font-mono text-xs">{o.discordRoleId}</td>
+                    <td className="font-mono text-xs">{roleNameById.get(o.discordRoleId) ?? o.discordRoleId}</td>
                     <td>{o.emoji ?? "—"}</td>
                     <td>{o.style}</td>
                     <td>
@@ -79,7 +85,12 @@ export default async function ReactionRolesPage() {
             <form action={addOption} className="flex flex-wrap gap-2 items-end">
               <input type="hidden" name="groupId" value={g.id} />
               <input name="label" placeholder="Etykieta" required className="w-40" />
-              <input name="discordRoleId" placeholder="ID roli" required className="w-40" />
+              <select name="discordRoleId" required className="w-48">
+                <option value="">Wybierz rolę…</option>
+                {roles.map((r) => (
+                  <option key={r.id} value={r.id}>{r.name}</option>
+                ))}
+              </select>
               <input name="emoji" placeholder="Emoji (opcjonalnie)" className="w-28" />
               <select name="style" defaultValue="SECONDARY">
                 {STYLES.map((s) => <option key={s} value={s}>{s}</option>)}

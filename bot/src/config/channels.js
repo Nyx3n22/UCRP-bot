@@ -23,7 +23,7 @@ async function getBoundChannelId(key) {
   return bindings.get(key) ?? null;
 }
 
-// alias używany też dla generycznych kluczy typu VERIFIED_ROLE (reużycie tabeli)
+// alias historyczny - kanały zawsze były trzymane w tym miejscu
 const getChannelId = getBoundChannelId;
 
 module.exports = { getBoundChannelId, getChannelId };

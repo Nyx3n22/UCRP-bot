@@ -33,11 +33,13 @@ model DiscordUser {
 
 model RoleBinding {
   id             String  @id @default(cuid())
-  discordRoleId  String  @unique
+  discordRoleId  String
   permissionKey  String  // np. MANAGE_EXAMS, DONATE_UNLIMITED_AI, MODERATE
   label          String  // czytelna nazwa z Dashboardu
   facultyId      String? // jeśli rola jest przypisana do konkretnego wydziału (kadra)
   faculty        Faculty? @relation(fields: [facultyId], references: [id])
+
+  @@unique([discordRoleId, permissionKey])
 }
 
 model ChannelBinding {
@@ -53,6 +55,7 @@ model AiConfig {
   provider          String   @default("huggingface") // WYŁĄCZNIE Hugging Face — pole zostaje dla przyszłej rozbudowy, ale kod bota nie obsługuje innych wartości
   apiKeyEncrypted   String   // token Hugging Face (hf_...), szyfrowany AES-256-GCM
   chatModel         String   @default("meta-llama/Llama-3.1-8B-Instruct") // model do bramki AI (chat completions), edytowalny w Dashboardzie
+  premiumChatModel  String?  // opcjonalny, lepszy model dla ról z DONATE_UNLIMITED_AI - jeśli puste, używany jest zwykły chatModel
   automodModel      String   @default("unitary/toxic-bert") // model klasyfikacyjny do automodu (text-classification)
   automodThreshold  Float    @default(0.7) // próg pewności (0-1), powyżej którego wiadomość jest usuwana
   allowedChannelIds String[] // bramka AI tylko na tych kanałach
@@ -123,6 +126,7 @@ model Subject {
   syllabus   Syllabus?
   questions  ExamQuestion[]
   grades     Grade[]
+  attendanceEntries AttendanceEntry[]
 
   @@unique([name, facultyId])
 }
@@ -190,18 +194,23 @@ model Grade {
   createdAt  DateTime    @default(now())
 }
 
-// ---------- FREKWENCJA ----------
+// ---------- FREKWENCJA (wpisywana ręcznie przez wykładowcę) ----------
 
-model AttendanceLog {
-  id          String   @id @default(cuid())
-  userId      String
-  voiceChannelId String
-  joinedAt    DateTime
-  leftAt      DateTime?
-  durationSec Int?
+model AttendanceEntry {
+  id             String   @id @default(cuid())
+  subjectId      String
+  subject        Subject  @relation(fields: [subjectId], references: [id])
+  studentId      String
+  lecturerId     String   // kto wpisał (do audytu, nie do wyświetlania studentowi)
+  present        Boolean  @default(true)
+  activityPoints Int      @default(0) // punkty aktywności za tę sesję, wpisywane ręcznie
+  sessionDate    DateTime @default(now())
+  note           String?
+
+  @@index([subjectId, studentId])
 }
 
-// ---------- STYPENDIA / BIBLIOTEKA / KOŁA / AKADEMIKI / PRACE DYPLOMOWE ----------
+// ---------- STYPENDIA / BIBLIOTEKA / KOŁA / PRACE DYPLOMOWE ----------
 
 model Scholarship {
   id        String   @id @default(cuid())
@@ -259,21 +268,6 @@ enum ThesisStatus {
   UNDER_REVIEW
   ACCEPTED
   REJECTED
-}
-
-model DormitoryRoom {
-  id         String   @id @default(cuid())
-  roomNumber String   @unique
-  rentIC     Int
-  residents  DormitoryResident[]
-}
-
-model DormitoryResident {
-  id       String        @id @default(cuid())
-  roomId   String
-  room     DormitoryRoom @relation(fields: [roomId], references: [id])
-  userId   String
-  movedInAt DateTime     @default(now())
 }
 
 model ConditionalRetake {

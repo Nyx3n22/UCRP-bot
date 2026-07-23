@@ -58,6 +58,7 @@ async function registerSlashCommands(commandData) {
 }
 
 (async () => {
+  console.log(`🔧 Start procesu. PORT z środowiska: ${process.env.PORT ?? "(brak - użyję domyślnego 3001)"}`);
   startHealthServer(); // najpierw otwieramy port - Render skanuje go od razu po starcie procesu
   const commandData = loadCommands();
   loadEvents();

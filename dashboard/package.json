@@ -9,7 +9,7 @@
     "prisma:generate": "prisma generate --schema=../prisma/schema.prisma"
   },
   "dependencies": {
-    "@prisma/client": "^5.22.0",
+    "@prisma/client": "^5.20.0",
     "next": "^14.2.15",
     "next-auth": "^4.24.8",
     "react": "^18.3.1",
@@ -23,10 +23,5 @@
     "prisma": "^5.20.0",
     "tailwindcss": "^3.4.13",
     "typescript": "^5.6.2"
-  },
-  "allowScripts": {
-    "prisma@5.22.0": true,
-    "@prisma/engines@5.22.0": true,
-    "@prisma/client@5.22.0": true
   }
 }

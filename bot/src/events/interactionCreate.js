@@ -27,6 +27,44 @@ module.exports = {
         return verificationService.handleModalSubmit(interaction);
       }
 
+      if (interaction.isButton() && interaction.customId.startsWith("usos_panel:")) {
+        const action = interaction.customId.split(":")[1];
+        const usosCommand = interaction.client.commands.get("usos");
+
+        if (action === "wystaw_ocene") return interaction.showModal(usosCommand.buildGradeModal());
+        if (action === "wpisz_frekwencje") return interaction.showModal(usosCommand.buildAttendanceModal());
+        if (action === "zatrudnij") return interaction.showModal(usosCommand.buildHireFireModal("hire"));
+        if (action === "zwolnij") return interaction.showModal(usosCommand.buildHireFireModal("fire"));
+        if (action === "napisz") return interaction.showModal(usosCommand.buildWriteModal());
+        if (action === "raport") return usosCommand.handleReportButton(interaction);
+        return;
+      }
+
+      if (interaction.isModalSubmit() && interaction.customId === "usos_grade_modal") {
+        const usosCommand = interaction.client.commands.get("usos");
+        return usosCommand.handleGradeModalSubmit(interaction);
+      }
+
+      if (interaction.isModalSubmit() && interaction.customId === "usos_attendance_modal") {
+        const usosCommand = interaction.client.commands.get("usos");
+        return usosCommand.handleAttendanceModalSubmit(interaction);
+      }
+
+      if (interaction.isModalSubmit() && interaction.customId === "usos_hire_modal") {
+        const usosCommand = interaction.client.commands.get("usos");
+        return usosCommand.handleHireFireModalSubmit(interaction, "hire");
+      }
+
+      if (interaction.isModalSubmit() && interaction.customId === "usos_fire_modal") {
+        const usosCommand = interaction.client.commands.get("usos");
+        return usosCommand.handleHireFireModalSubmit(interaction, "fire");
+      }
+
+      if (interaction.isModalSubmit() && interaction.customId === "usos_write_modal") {
+        const usosCommand = interaction.client.commands.get("usos");
+        return usosCommand.handleWriteModalSubmit(interaction);
+      }
+
       if (interaction.isModalSubmit() && interaction.customId === "dziekanat_modal") {
         const tytul = interaction.fields.getTextInputValue("tytul");
         const wydzial = interaction.fields.getTextInputValue("wydzial");
@@ -144,11 +182,21 @@ module.exports = {
         const roleId = interaction.customId.split(":")[1];
         const member = interaction.member;
         const has = member.roles.cache.has(roleId);
-        await member.roles[has ? "remove" : "add"](roleId).catch(() => null);
-        return interaction.reply({
-          content: has ? "➖ Rola usunięta." : "➕ Rola nadana.",
-          ephemeral: true,
-        });
+
+        try {
+          await member.roles[has ? "remove" : "add"](roleId);
+          return interaction.reply({
+            content: has ? "➖ Rola usunięta." : "➕ Rola nadana.",
+            ephemeral: true,
+          });
+        } catch (err) {
+          console.error(`[reactionrole] Nie udało się ${has ? "usunąć" : "nadać"} roli ${roleId}:`, err.message);
+          return interaction.reply({
+            content:
+              "❌ Nie udało się zmienić roli. Najczęstsza przyczyna: rola bota na serwerze jest ustawiona NIŻEJ niż ta rola w hierarchii ról (Ustawienia serwera → Role → przeciągnij rolę bota wyżej niż wszystkie role, które ma nadawać).",
+            ephemeral: true,
+          });
+        }
       }
     } catch (err) {
       console.error("[interactionCreate] Błąd:", err);

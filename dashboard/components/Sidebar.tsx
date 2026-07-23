@@ -3,6 +3,8 @@ import Link from "next/link";
 const NAV = [
   { href: "/", label: "Przegląd" },
   { href: "/channels", label: "Kanały" },
+  { href: "/roles", label: "Role i uprawnienia" },
+  { href: "/verification", label: "Weryfikacja" },
   { href: "/ai-module", label: "Moduł AI" },
   { href: "/exams", label: "Egzaminy" },
   { href: "/syllabuses", label: "Sylabusy" },
