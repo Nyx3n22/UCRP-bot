@@ -41,6 +41,11 @@ export default async function ExamsPage({ searchParams }: { searchParams: { subj
 
           <details className="card p-4">
             <summary className="cursor-pointer text-sm text-brass">+ Nowy przedmiot</summary>
+            {faculties.length === 0 ? (
+              <p className="text-xs text-burgundy mt-3">
+                Brak wydziałów. <Link href="/faculties" className="underline">Dodaj najpierw wydział</Link>.
+              </p>
+            ) : (
             <form action={createSubject} className="flex flex-col gap-2 mt-3">
               <input name="name" placeholder="Nazwa przedmiotu" required />
               <select name="facultyId" required>
@@ -52,6 +57,7 @@ export default async function ExamsPage({ searchParams }: { searchParams: { subj
               <input name="ectsPoints" type="number" placeholder="Punkty ECTS" />
               <button type="submit" className="btn-primary text-sm">Utwórz</button>
             </form>
+            )}
           </details>
         </div>
 

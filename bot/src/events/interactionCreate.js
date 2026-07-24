@@ -27,6 +27,18 @@ module.exports = {
         return verificationService.handleModalSubmit(interaction);
       }
 
+      if (interaction.isButton() && interaction.customId === "verify_captcha_button") {
+        return interaction.showModal(verificationService.buildCaptchaModal());
+      }
+
+      if (interaction.isModalSubmit() && interaction.customId === "verify_captcha_modal") {
+        return verificationService.handleCaptchaModalSubmit(interaction);
+      }
+
+      if (interaction.isButton() && interaction.customId === "verify_roblox_check_button") {
+        return verificationService.handleRobloxCheckButton(interaction);
+      }
+
       if (interaction.isButton() && interaction.customId.startsWith("usos_panel:")) {
         const action = interaction.customId.split(":")[1];
         const usosCommand = interaction.client.commands.get("usos");
