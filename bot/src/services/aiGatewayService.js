@@ -73,7 +73,7 @@ async function generateAiReply(userMessage, aiConfig, { isPremium = false } = {}
     {
       role: "system",
       content:
-        "Jesteś pomocnym asystentem RP na serwerze Uniwersytet Warszawski RP. Odpowiadaj zwięźle i w klimacie uczelnianym.",
+        "Jesteś pomocnym asystentem RP na serwerze Uniwersytet Centralny RP. Odpowiadaj zwięźle i w klimacie uczelnianym.",
     },
     { role: "user", content: userMessage },
   ]);

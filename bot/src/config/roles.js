@@ -31,6 +31,7 @@ const PERMISSION_KEYS = {
   ADMINISTRACJA_ROLE: "ADMINISTRACJA_ROLE",
   VERIFIED_ROLE: "VERIFIED_ROLE",
   RECTORATE_ACCESS: "RECTORATE_ACCESS", // Rektor/Prorektor - audyt całej uczelni, nie tylko jednego wydziału
+  PARTNERSHIP_MANAGER: "PARTNERSHIP_MANAGER", // osoby odpowiedzialne za rozpatrywanie partnerstw
 };
 
 let cache = { bindings: [], fetchedAt: 0 };

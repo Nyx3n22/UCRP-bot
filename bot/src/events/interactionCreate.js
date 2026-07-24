@@ -47,9 +47,32 @@ module.exports = {
         if (action === "wpisz_frekwencje") return interaction.showModal(usosCommand.buildAttendanceModal());
         if (action === "zatrudnij") return interaction.showModal(usosCommand.buildHireFireModal("hire"));
         if (action === "zwolnij") return interaction.showModal(usosCommand.buildHireFireModal("fire"));
-        if (action === "napisz") return interaction.showModal(usosCommand.buildWriteModal());
+        if (action === "napisz") {
+          return interaction.reply({
+            content: "Wybierz wykładowcę, do którego chcesz napisać:",
+            components: [usosCommand.buildLecturerSelectRow()],
+            ephemeral: true,
+          });
+        }
         if (action === "raport") return usosCommand.handleReportButton(interaction);
         return;
+      }
+
+      if (interaction.isModalSubmit() && interaction.customId.startsWith("wiadomosc_tekst_modal:")) {
+        const channelId = interaction.customId.split(":")[1];
+        const wiadomoscCommand = interaction.client.commands.get("wiadomosc");
+        return wiadomoscCommand.handleTextModalSubmit(interaction, channelId);
+      }
+
+      if (interaction.isModalSubmit() && interaction.customId.startsWith("wiadomosc_embed_modal:")) {
+        const channelId = interaction.customId.split(":")[1];
+        const wiadomoscCommand = interaction.client.commands.get("wiadomosc");
+        return wiadomoscCommand.handleEmbedModalSubmit(interaction, channelId);
+      }
+
+      if (interaction.isModalSubmit() && interaction.customId === "partnerstwo_modal") {
+        const partnerstwoCommand = interaction.client.commands.get("partnerstwo");
+        return partnerstwoCommand.handleModalSubmit(interaction);
       }
 
       if (interaction.isModalSubmit() && interaction.customId === "usos_grade_modal") {
@@ -72,9 +95,16 @@ module.exports = {
         return usosCommand.handleHireFireModalSubmit(interaction, "fire");
       }
 
-      if (interaction.isModalSubmit() && interaction.customId === "usos_write_modal") {
+      if (interaction.isUserSelectMenu() && interaction.customId === "usos_select_lecturer") {
+        const lecturerId = interaction.values[0];
         const usosCommand = interaction.client.commands.get("usos");
-        return usosCommand.handleWriteModalSubmit(interaction);
+        return interaction.showModal(usosCommand.buildWriteModal(lecturerId));
+      }
+
+      if (interaction.isModalSubmit() && interaction.customId.startsWith("usos_write_modal:")) {
+        const lecturerId = interaction.customId.split(":")[1];
+        const usosCommand = interaction.client.commands.get("usos");
+        return usosCommand.handleWriteModalSubmit(interaction, lecturerId);
       }
 
       if (interaction.isModalSubmit() && interaction.customId === "dziekanat_modal") {
@@ -191,21 +221,26 @@ module.exports = {
 
       // Reaction Role / Autorole przez przyciski, obsługiwane generycznie
       if (interaction.isButton() && interaction.customId.startsWith("reactionrole:")) {
-        const roleId = interaction.customId.split(":")[1];
+        const roleIds = interaction.customId.split(":")[1].split(",").filter(Boolean);
         const member = interaction.member;
-        const has = member.roles.cache.has(roleId);
+        // "ma" liczymy po PIERWSZEJ roli z listy - jeśli ktoś ma choć jedną, traktujemy jako "ma cały zestaw"
+        const has = roleIds.some((id) => member.roles.cache.has(id));
 
         try {
-          await member.roles[has ? "remove" : "add"](roleId);
+          if (has) {
+            await Promise.all(roleIds.map((id) => member.roles.remove(id)));
+          } else {
+            await Promise.all(roleIds.map((id) => member.roles.add(id)));
+          }
           return interaction.reply({
-            content: has ? "➖ Rola usunięta." : "➕ Rola nadana.",
+            content: has ? `➖ Usunięto ${roleIds.length > 1 ? "role" : "rolę"}.` : `➕ Nadano ${roleIds.length > 1 ? "role" : "rolę"}.`,
             ephemeral: true,
           });
         } catch (err) {
-          console.error(`[reactionrole] Nie udało się ${has ? "usunąć" : "nadać"} roli ${roleId}:`, err.message);
+          console.error(`[reactionrole] Nie udało się zmienić ról ${roleIds.join(",")}:`, err.message);
           return interaction.reply({
             content:
-              "❌ Nie udało się zmienić roli. Najczęstsza przyczyna: rola bota na serwerze jest ustawiona NIŻEJ niż ta rola w hierarchii ról (Ustawienia serwera → Role → przeciągnij rolę bota wyżej niż wszystkie role, które ma nadawać).",
+              "❌ Nie udało się zmienić roli/ról. Najczęstsza przyczyna: rola bota na serwerze jest ustawiona NIŻEJ niż któraś z tych ról w hierarchii ról (Ustawienia serwera → Role → przeciągnij rolę bota wyżej niż wszystkie role, które ma nadawać).",
             ephemeral: true,
           });
         }

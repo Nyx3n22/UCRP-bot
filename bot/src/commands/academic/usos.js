@@ -22,6 +22,7 @@ const {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
+  UserSelectMenuBuilder,
 } = require("discord.js");
 const prisma = require("../../lib/prisma");
 const { hasPermission, getRoleIdForPermission } = require("../../config/roles");
@@ -174,14 +175,23 @@ module.exports = {
       );
   },
 
-  buildWriteModal() {
+  /** Krok 1 "Napisz do wykładowcy": lista wyboru użytkownika zamiast ręcznego wpisywania ID */
+  buildLecturerSelectRow() {
+    return new ActionRowBuilder().addComponents(
+      new UserSelectMenuBuilder()
+        .setCustomId("usos_select_lecturer")
+        .setPlaceholder("Wybierz wykładowcę, do którego piszesz")
+        .setMinValues(1)
+        .setMaxValues(1)
+    );
+  },
+
+  /** Krok 2: po wyborze osoby - modal tylko na treść wiadomości, ID odbiorcy w customId */
+  buildWriteModal(lecturerId) {
     return new ModalBuilder()
-      .setCustomId("usos_write_modal")
+      .setCustomId(`usos_write_modal:${lecturerId}`)
       .setTitle("Napisz do wykładowcy")
       .addComponents(
-        new ActionRowBuilder().addComponents(
-          new TextInputBuilder().setCustomId("wykladowca").setLabel("Wykładowca (@wzmianka lub ID)").setStyle(TextInputStyle.Short).setRequired(true)
-        ),
         new ActionRowBuilder().addComponents(
           new TextInputBuilder().setCustomId("tresc").setLabel("Treść wiadomości").setStyle(TextInputStyle.Paragraph).setRequired(true)
         )
@@ -271,21 +281,21 @@ module.exports = {
     );
   },
 
-  async handleWriteModalSubmit(interaction) {
-    const wykladowcaId = parseUserId(interaction.fields.getTextInputValue("wykladowca"));
-    const tresc = interaction.fields.getTextInputValue("tresc");
+  async handleWriteModalSubmit(interaction, lecturerId) {
+    await interaction.deferReply({ ephemeral: true });
 
-    const wykladowca = await interaction.client.users.fetch(wykladowcaId).catch(() => null);
-    if (!wykladowca) return interaction.reply({ content: "Nie znaleziono takiego użytkownika.", ephemeral: true });
+    const tresc = interaction.fields.getTextInputValue("tresc");
+    const wykladowca = await interaction.client.users.fetch(lecturerId).catch(() => null);
+    if (!wykladowca) return interaction.editReply("Nie znaleziono takiego użytkownika.");
 
     const dm = await wykladowca
       .send(`📩 **Wiadomość od studenta** <@${interaction.user.id}> (${interaction.user.tag}):\n\n${tresc}`)
       .catch(() => null);
 
     if (!dm) {
-      return interaction.reply({ content: "❌ Nie udało się wysłać — wykładowca może mieć zablokowane DM.", ephemeral: true });
+      return interaction.editReply("❌ Nie udało się wysłać — wykładowca może mieć zablokowane DM.");
     }
-    return interaction.reply({ content: `✅ Wiadomość wysłana do <@${wykladowcaId}>.`, ephemeral: true });
+    return interaction.editReply(`✅ Wiadomość wysłana do <@${lecturerId}>.`);
   },
 
   async handleReportButton(interaction) {

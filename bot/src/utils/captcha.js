@@ -16,8 +16,8 @@ function randomCode(length = 6) {
   return out;
 }
 
-function generateCaptcha() {
-  const code = randomCode();
+function generateCaptcha(length = 6) {
+  const code = randomCode(length);
   const width = 260;
   const height = 90;
   const canvas = createCanvas(width, height);

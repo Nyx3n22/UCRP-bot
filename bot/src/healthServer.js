@@ -21,7 +21,7 @@ function startHealthServer() {
 
   const server = http.createServer((req, res) => {
     res.writeHead(200, { "Content-Type": "text/plain" });
-    res.end("Bot UWRP RP - działa.");
+    res.end("Bot UC RP - działa.");
   });
 
   server.on("error", (err) => {

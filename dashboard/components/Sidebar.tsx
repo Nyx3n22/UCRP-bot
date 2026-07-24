@@ -33,7 +33,7 @@ export default function Sidebar({ userTag }: { userTag: string }) {
   return (
     <aside className="w-64 shrink-0 border-r border-line min-h-screen p-6 flex flex-col justify-between overflow-y-auto">
       <div>
-        <p className="label-eyebrow mb-1">UW RP</p>
+        <p className="label-eyebrow mb-1">UC RP</p>
         <Link href="/">
           <h1 className="font-display text-xl mb-8 hover:text-brass transition-colors">Dashboard</h1>
         </Link>

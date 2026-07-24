@@ -33,25 +33,40 @@ module.exports = {
 
     const age = this._calculateAge(character.birthDateIC);
 
+    const robloxField = character.user.robloxUsername
+      ? `[${character.user.robloxUsername}](https://www.roblox.com/users/${character.user.robloxId}/profile)`
+      : "—";
+
+    const fields = [
+      { name: "Imię i nazwisko IC", value: `${character.firstNameIC} ${character.lastNameIC}`, inline: true },
+      { name: "Wiek IC", value: `${age}`, inline: true },
+      { name: "Płeć", value: character.genderIC === "MALE" ? "Mężczyzna" : "Kobieta", inline: true },
+      { name: "Konto Discord", value: `<@${target.id}>`, inline: true },
+      { name: "Konto Roblox", value: robloxField, inline: true },
+      { name: "PESEL", value: `\`${character.pesel}\``, inline: true },
+    ];
+
+    // "Rok studiów" ma sens tylko dla kogoś kto faktycznie studiuje - dla kadry/administracji
+    // bez przypisanego roku to pole tylko myliło (pokazywało "—" nawet dla wykładowców)
+    if (character.yearOfStudy !== null && character.yearOfStudy !== undefined) {
+      fields.push({ name: "Rok studiów", value: `${character.yearOfStudy}`, inline: true });
+    }
+
+    fields.push(
+      { name: "Wynagrodzenie IC", value: `${character.salaryIC} zł`, inline: true },
+      { name: "Wydział", value: character.faculty?.name ?? "Brak przypisania", inline: true },
+      { name: "Tytuł naukowy", value: character.scientificTitle ?? "Brak", inline: true }
+    );
+
     const embed = new EmbedBuilder()
       .setTitle(`🎓 Karta postaci — ${character.firstNameIC} ${character.lastNameIC}`)
       .setThumbnail(target.displayAvatarURL())
-      .addFields(
-        { name: "Imię i nazwisko IC", value: `${character.firstNameIC} ${character.lastNameIC}`, inline: true },
-        { name: "Wiek IC", value: `${age}`, inline: true },
-        { name: "Płeć", value: character.genderIC === "MALE" ? "Mężczyzna" : "Kobieta", inline: true },
-        { name: "Konto Discord", value: `<@${target.id}>`, inline: true },
-        { name: "Konto Roblox", value: character.user.robloxUsername ?? "—", inline: true },
-        { name: "PESEL", value: `\`${character.pesel}\``, inline: true },
-        { name: "Rok studiów", value: `${character.yearOfStudy ?? "—"}`, inline: true },
-        { name: "Wynagrodzenie IC", value: `${character.salaryIC} zł`, inline: true },
-        { name: "Wydział", value: character.faculty?.name ?? "Brak przypisania", inline: true },
-        { name: "Tytuł naukowy", value: character.scientificTitle ?? "Brak", inline: true }
-      )
+      .addFields(fields)
       .setFooter({ text: `Nr albumu: ${character.albumNumber}` })
       .setColor(0x8a1538);
 
-    await interaction.reply({ embeds: [embed] });
+    // Widoczne tylko dla osoby, która wywołała komendę - nie dla całego kanału
+    await interaction.reply({ embeds: [embed], ephemeral: true });
   },
 
   _calculateAge(birthDate) {

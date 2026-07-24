@@ -15,15 +15,31 @@ export async function createGroup(formData: FormData) {
 
 export async function addOption(formData: FormData) {
   const groupId = String(formData.get("groupId") ?? "");
-  const discordRoleId = String(formData.get("discordRoleId") ?? "").trim();
+  const discordRoleIds = formData.getAll("discordRoleIds").map(String);
   const label = String(formData.get("label") ?? "").trim();
   const emoji = String(formData.get("emoji") ?? "").trim();
   const style = String(formData.get("style") ?? "SECONDARY");
   const order = Number(formData.get("order") ?? 0);
-  if (!groupId || !discordRoleId || !label) return;
+  if (!groupId || discordRoleIds.length === 0 || !label) return;
 
   await prisma.reactionRoleOption.create({
-    data: { groupId, discordRoleId, label, emoji: emoji || null, style: style as never, order },
+    data: { groupId, discordRoleIds, label, emoji: emoji || null, style: style as never, order },
+  });
+  revalidatePath("/reaction-roles");
+}
+
+export async function updateOption(formData: FormData) {
+  const id = String(formData.get("id") ?? "");
+  const discordRoleIds = formData.getAll("discordRoleIds").map(String);
+  const label = String(formData.get("label") ?? "").trim();
+  const emoji = String(formData.get("emoji") ?? "").trim();
+  const style = String(formData.get("style") ?? "SECONDARY");
+  const order = Number(formData.get("order") ?? 0);
+  if (!id || discordRoleIds.length === 0 || !label) return;
+
+  await prisma.reactionRoleOption.update({
+    where: { id },
+    data: { discordRoleIds, label, emoji: emoji || null, style: style as never, order },
   });
   revalidatePath("/reaction-roles");
 }

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { fetchGuildRoles } from "@/lib/discord";
-import { createGroup, addOption, deleteOption, deleteGroup } from "./actions";
+import { createGroup, addOption, deleteGroup } from "./actions";
+import OptionRow from "./OptionRow";
 
 const STYLES = ["PRIMARY", "SECONDARY", "SUCCESS", "DANGER"];
 
@@ -62,19 +63,7 @@ export default async function ReactionRolesPage() {
               </thead>
               <tbody>
                 {g.options.map((o) => (
-                  <tr key={o.id}>
-                    <td>{o.order}</td>
-                    <td>{o.label}</td>
-                    <td className="font-mono text-xs">{roleNameById.get(o.discordRoleId) ?? o.discordRoleId}</td>
-                    <td>{o.emoji ?? "—"}</td>
-                    <td>{o.style}</td>
-                    <td>
-                      <form action={deleteOption}>
-                        <input type="hidden" name="id" value={o.id} />
-                        <button type="submit" className="btn-danger text-xs">Usuń</button>
-                      </form>
-                    </td>
-                  </tr>
+                  <OptionRow key={o.id} option={o} roles={roles} roleNameById={roleNameById} />
                 ))}
                 {g.options.length === 0 && (
                   <tr><td colSpan={6} className="text-parchment/40 text-center py-4">Brak opcji.</td></tr>
@@ -82,15 +71,20 @@ export default async function ReactionRolesPage() {
               </tbody>
             </table>
 
-            <form action={addOption} className="flex flex-wrap gap-2 items-end">
+            <form action={addOption} className="flex flex-wrap gap-3 items-end">
               <input type="hidden" name="groupId" value={g.id} />
-              <input name="label" placeholder="Etykieta" required className="w-40" />
-              <select name="discordRoleId" required className="w-48">
-                <option value="">Wybierz rolę…</option>
-                {roles.map((r) => (
-                  <option key={r.id} value={r.id}>{r.name}</option>
-                ))}
-              </select>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-parchment/50">Etykieta</label>
+                <input name="label" placeholder="Etykieta" required className="w-40" />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-parchment/50">Role (Ctrl/Cmd + klik = wiele naraz)</label>
+                <select name="discordRoleIds" multiple required className="w-56 h-24">
+                  {roles.map((r) => (
+                    <option key={r.id} value={r.id}>{r.name}</option>
+                  ))}
+                </select>
+              </div>
               <input name="emoji" placeholder="Emoji (opcjonalnie)" className="w-28" />
               <select name="style" defaultValue="SECONDARY">
                 {STYLES.map((s) => <option key={s} value={s}>{s}</option>)}

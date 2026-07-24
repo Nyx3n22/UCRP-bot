@@ -26,4 +26,5 @@ export const PERMISSION_KEYS = [
   { key: "ADMINISTRACJA_ROLE", label: "Rola nadawana po akceptacji podania: Administracja" },
   { key: "VERIFIED_ROLE", label: "Rola nadawana po zakończeniu weryfikacji" },
   { key: "RECTORATE_ACCESS", label: "Rektorat - audyt całej uczelni (/usos audyt)" },
+  { key: "PARTNERSHIP_MANAGER", label: "Odpowiedzialny za partnerstwa" },
 ] as const;

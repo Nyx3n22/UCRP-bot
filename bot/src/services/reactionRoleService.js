@@ -51,7 +51,7 @@ class ReactionRoleService {
       const row = new ActionRowBuilder().addComponents(
         chunk.map((opt) => {
           const button = new ButtonBuilder()
-            .setCustomId(`reactionrole:${opt.discordRoleId}`)
+            .setCustomId(`reactionrole:${opt.discordRoleIds.join(",")}`)
             .setLabel(opt.label)
             .setStyle(STYLE_MAP[opt.style] ?? ButtonStyle.Secondary);
           if (opt.emoji) button.setEmoji(opt.emoji);

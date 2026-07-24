@@ -376,6 +376,18 @@ enum SocialPlatform {
   TIKTOK
 }
 
+// ---------- WERYFIKACJA ----------
+
+model VerificationConfig {
+  id                String   @id @default("singleton")
+  captchaCodeLength Int      @default(6)  // długość kodu na obrazku captcha
+  robloxCodeLength  Int      @default(8)  // długość kodu wklejanego w opisie profilu Roblox
+  panelTitle        String   @default("🎓 Weryfikacja — Uniwersytet Centralny RP")
+  panelDescription  String   @default("Kliknij przycisk poniżej, aby rozpocząć weryfikację. Podasz Imię i Nazwisko IC oraz datę urodzenia, przejdziesz captchę, a na końcu połączymy Twoje konto z Robloxem.") @db.Text
+  robloxInstructions String  @default("Wejdź na swój profil Roblox → Edytuj profil → Opis (About), wklej podany kod, zapisz zmiany, wróć tutaj i kliknij \"Sprawdź teraz\".") @db.Text
+  updatedAt         DateTime @updatedAt
+}
+
 // ---------- REACTION ROLE / AUTOROLE ----------
 
 model ReactionRoleGroup {
@@ -388,14 +400,14 @@ model ReactionRoleGroup {
 }
 
 model ReactionRoleOption {
-  id            String            @id @default(cuid())
-  groupId       String
-  group         ReactionRoleGroup @relation(fields: [groupId], references: [id])
-  discordRoleId String
-  label         String
-  emoji         String?
-  style         ButtonStyleOption @default(SECONDARY)
-  order         Int               @default(0)
+  id             String            @id @default(cuid())
+  groupId        String
+  group          ReactionRoleGroup @relation(fields: [groupId], references: [id])
+  discordRoleIds String[]          // jeden przycisk może nadawać/zdejmować kilka ról naraz
+  label          String
+  emoji          String?
+  style          ButtonStyleOption @default(SECONDARY)
+  order          Int               @default(0)
 }
 
 enum ButtonStyleOption {

@@ -7,7 +7,7 @@ const fraunces = Fraunces({ subsets: ["latin", "latin-ext"], variable: "--font-f
 const inter = Inter({ subsets: ["latin", "latin-ext"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
-  title: "Dashboard — Uniwersytet Warszawski RP",
+  title: "Dashboard — Uniwersytet Centralny RP",
   description: "Panel administracyjny bota Discord",
 };
 

@@ -26,7 +26,7 @@ module.exports = {
     if (verificationChannelId) {
       await member
         .send(
-          `👋 Witaj na Uniwersytecie Warszawskim RP! Przejdź weryfikację na kanale <#${verificationChannelId}>, aby uzyskać dostęp do serwera.`
+          `👋 Witaj na Uniwersytecie Centralnym RP! Przejdź weryfikację na kanale <#${verificationChannelId}>, aby uzyskać dostęp do serwera.`
         )
         .catch(() => null); // DM mogą być zablokowane — nie blokujemy dołączenia
     }

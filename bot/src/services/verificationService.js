@@ -82,7 +82,8 @@ class VerificationService {
       );
     }
 
-    const captcha = generateCaptcha();
+    const config = await this._getConfig();
+    const captcha = generateCaptcha(config.captchaCodeLength);
 
     this._pendingVerifications.set(interaction.user.id, {
       firstNameIC,
@@ -136,16 +137,14 @@ class VerificationService {
       return interaction.reply({ content: "❌ Błędny kod z obrazka. Spróbuj ponownie (przycisk nadal działa).", ephemeral: true });
     }
 
+    const config = await this._getConfig();
     pending.captchaVerified = true;
-    pending.verificationCode = randomCode();
+    pending.verificationCode = randomCode(config.robloxCodeLength);
 
     const embed = new EmbedBuilder()
       .setTitle("Ostatni krok — potwierdź konto Roblox")
       .setDescription(
-        `1. Wejdź na swój profil Roblox (**${pending.robloxUsername}**) → Edytuj profil → Opis (About)\n` +
-          `2. Wklej dokładnie ten kod gdziekolwiek w opisie:\n\n\`\`\`${pending.verificationCode}\`\`\`\n` +
-          `3. Zapisz zmiany na Roblox\n` +
-          `4. Wróć tutaj i kliknij przycisk "Sprawdź teraz"\n\n` +
+        `${config.robloxInstructions}\n\nTwój kod:\n\`\`\`${pending.verificationCode}\`\`\`\n\n` +
           `Kod możesz usunąć z opisu zaraz po udanej weryfikacji.`
       )
       .setColor(0x1a2a6c);
@@ -213,6 +212,21 @@ class VerificationService {
 
     return interaction.editReply(
       `✅ Weryfikacja zakończona! Witaj, **${pending.firstNameIC} ${pending.lastNameIC}**. Możesz teraz usunąć kod z opisu profilu Roblox.`
+    );
+  }
+
+  async _getConfig() {
+    const config = await prisma.verificationConfig.findUnique({ where: { id: "singleton" } });
+    return (
+      config ?? {
+        captchaCodeLength: 6,
+        robloxCodeLength: 8,
+        panelTitle: "🎓 Weryfikacja — Uniwersytet Centralny RP",
+        panelDescription:
+          "Kliknij przycisk poniżej, aby rozpocząć weryfikację. Podasz Imię i Nazwisko IC oraz datę urodzenia, przejdziesz captchę, a na końcu połączymy Twoje konto z Robloxem.",
+        robloxInstructions:
+          'Wejdź na swój profil Roblox → Edytuj profil → Opis (About), wklej podany kod, zapisz zmiany, wróć tutaj i kliknij "Sprawdź teraz".',
+      }
     );
   }
 
