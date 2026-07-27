@@ -63,6 +63,12 @@ export default async function RolesPage() {
               ))}
             </select>
           </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-parchment/50">
+              Rok studiów (tylko gdy uprawnienie = STUDY_YEAR_ROLE, np. rola "Student Pierwszego Roku" → 1)
+            </label>
+            <input name="studyYear" type="number" min={1} max={8} placeholder="np. 1" className="w-32" />
+          </div>
           <button type="submit" className="btn-primary self-start">Dodaj powiązanie</button>
         </form>
       </div>

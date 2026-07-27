@@ -134,56 +134,6 @@ module.exports = {
         return interaction.reply({ content: "✅ Ogłoszenie Dziekanatu opublikowane.", ephemeral: true });
       }
 
-      if (interaction.isModalSubmit() && interaction.customId.startsWith("podanie_modal:")) {
-        const type = interaction.customId.split(":")[1];
-        const fieldKeysByType = {
-          STUDENT: ["wydzial", "motywacja", "dodatkowe"],
-          WYKLADOWCA: ["wydzial", "przedmiot", "doswiadczenie", "motywacja"],
-          ADMINISTRACJA: ["stanowisko", "doswiadczenie", "dyspozycyjnosc", "motywacja"],
-        };
-        const answers = {};
-        for (const key of fieldKeysByType[type] ?? []) {
-          try {
-            answers[key] = interaction.fields.getTextInputValue(key);
-          } catch {
-            // pole opcjonalne, nie zostało wypełnione
-          }
-        }
-
-        try {
-          const application = await applicationService.submit(interaction.user.id, type, answers);
-
-          const channelKey = `APPLICATIONS_${type}`;
-          const channelId = await getBoundChannelId(channelKey);
-          if (!channelId) {
-            return interaction.reply({
-              content: "✅ Podanie zapisane, ale kanał do jego rozpatrzenia nie jest skonfigurowany w Dashboardzie — poinformuj administrację.",
-              ephemeral: true,
-            });
-          }
-
-          const embed = new EmbedBuilder()
-            .setTitle(`📝 Nowe podanie — ${type}`)
-            .setDescription(`Zgłaszający: <@${interaction.user.id}>`)
-            .addFields(Object.entries(answers).map(([k, v]) => ({ name: k, value: v.slice(0, 1024) })))
-            .setColor(0x1a2a6c)
-            .setFooter({ text: `ID podania: ${application.id}` })
-            .setTimestamp();
-
-          const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`application_accept:${application.id}`).setLabel("Akceptuj").setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId(`application_reject:${application.id}`).setLabel("Odrzuć").setStyle(ButtonStyle.Danger)
-          );
-
-          const channel = await interaction.guild.channels.fetch(channelId);
-          await channel.send({ embeds: [embed], components: [row] });
-
-          return interaction.reply({ content: "✅ Podanie złożone. Otrzymasz wiadomość po jego rozpatrzeniu.", ephemeral: true });
-        } catch (err) {
-          return interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
-        }
-      }
-
       if (interaction.isButton() && (interaction.customId.startsWith("application_accept:") || interaction.customId.startsWith("application_reject:"))) {
         if (!(await hasPermission(interaction.member, "REVIEW_APPLICATIONS"))) {
           return interaction.reply({ content: "❌ Brak uprawnień do rozpatrywania podań.", ephemeral: true });

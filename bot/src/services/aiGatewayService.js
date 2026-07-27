@@ -64,8 +64,8 @@ async function callHfClassification(apiKey, model, text) {
   return Array.isArray(data[0]) ? data[0] : data;
 }
 
-/** Bramka AI — odpowiedź na wiadomość użytkownika na dozwolonym kanale */
-async function generateAiReply(userMessage, aiConfig, { isPremium = false } = {}) {
+/** Bramka AI — odpowiedź na wiadomość użytkownika na dozwolonym kanale (albo w imieniu NPC, jeśli podano systemPrompt) */
+async function generateAiReply(userMessage, aiConfig, { isPremium = false, systemPrompt = null } = {}) {
   const apiKey = decrypt(aiConfig.apiKeyEncrypted);
   const model = isPremium && aiConfig.premiumChatModel ? aiConfig.premiumChatModel : aiConfig.chatModel;
 
@@ -73,6 +73,7 @@ async function generateAiReply(userMessage, aiConfig, { isPremium = false } = {}
     {
       role: "system",
       content:
+        systemPrompt ??
         "Jesteś pomocnym asystentem RP na serwerze Uniwersytet Centralny RP. Odpowiadaj zwięźle i w klimacie uczelnianym.",
     },
     { role: "user", content: userMessage },

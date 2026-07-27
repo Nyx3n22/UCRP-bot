@@ -32,6 +32,7 @@ const PERMISSION_KEYS = {
   VERIFIED_ROLE: "VERIFIED_ROLE",
   RECTORATE_ACCESS: "RECTORATE_ACCESS", // Rektor/Prorektor - audyt całej uczelni, nie tylko jednego wydziału
   PARTNERSHIP_MANAGER: "PARTNERSHIP_MANAGER", // osoby odpowiedzialne za rozpatrywanie partnerstw
+  STUDY_YEAR_ROLE: "STUDY_YEAR_ROLE", // rola typu "Student Pierwszego Roku" - automatycznie ustawia yearOfStudy
 };
 
 let cache = { bindings: [], fetchedAt: 0 };
@@ -67,6 +68,13 @@ async function getScientificTitleBinding(member) {
   return titleBindings.find((b) => member.roles.cache.has(b.discordRoleId)) ?? null;
 }
 
+/** Zwraca wiążącą rolę roku studiów (STUDY_YEAR_ROLE), jeśli member ją ma */
+async function getStudyYearBinding(member) {
+  const bindings = await loadBindings();
+  const yearBindings = bindings.filter((b) => b.permissionKey === PERMISSION_KEYS.STUDY_YEAR_ROLE && b.studyYear !== null);
+  return yearBindings.find((b) => member.roles.cache.has(b.discordRoleId)) ?? null;
+}
+
 /** Zwraca ID pierwszej roli Discord powiązanej z danym kluczem uprawnień (np. do nadania po akceptacji podania) */
 async function getRoleIdForPermission(permissionKey) {
   const bindings = await loadBindings();
@@ -74,4 +82,4 @@ async function getRoleIdForPermission(permissionKey) {
   return binding?.discordRoleId ?? null;
 }
 
-module.exports = { PERMISSION_KEYS, hasPermission, getScientificTitleBinding, getRoleIdForPermission };
+module.exports = { PERMISSION_KEYS, hasPermission, getScientificTitleBinding, getRoleIdForPermission, getStudyYearBinding };

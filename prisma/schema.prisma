@@ -34,10 +34,11 @@ model DiscordUser {
 model RoleBinding {
   id             String  @id @default(cuid())
   discordRoleId  String
-  permissionKey  String  // np. MANAGE_EXAMS, DONATE_UNLIMITED_AI, MODERATE
+  permissionKey  String  // np. MANAGE_EXAMS, DONATE_UNLIMITED_AI, MODERATE, STUDY_YEAR_ROLE
   label          String  // czytelna nazwa z Dashboardu
   facultyId      String? // jeśli rola jest przypisana do konkretnego wydziału (kadra)
   faculty        Faculty? @relation(fields: [facultyId], references: [id])
+  studyYear      Int?    // tylko dla permissionKey = STUDY_YEAR_ROLE, np. "Student Pierwszego Roku" -> 1
 
   @@unique([discordRoleId, permissionKey])
 }
@@ -326,6 +327,7 @@ model Application {
   userId     String
   type       ApplicationType
   answers    Json
+  aiAnalysis String?  @db.Text // wstępna analiza AI - generowana od razu po złożeniu, zanim trafi do ludzi
   status     ApplicationStatus @default(PENDING)
   reviewedById String?
   createdAt  DateTime @default(now())
@@ -366,6 +368,17 @@ model SocialMediaSubscription {
   createdAt        DateTime       @default(now())
 
   @@unique([platform, externalHandle, discordChannelId])
+}
+
+// ---------- NPC (AI gra postaciami tła) ----------
+
+model NpcCharacter {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  personality String   @db.Text // opis osobowości/backstory - staje się system promptem dla AI
+  avatarUrl   String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
 }
 
 enum SocialPlatform {

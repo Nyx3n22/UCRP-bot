@@ -19,6 +19,11 @@ class PunishmentService {
       await this._expelStudent(guild, targetUserId);
     }
 
+    const member = await guild.members.fetch(targetUserId).catch(() => null);
+    await member
+      ?.send(`⚖️ **Otrzymałeś/aś karę dyscyplinarną**\nRodzaj: **${severity}**\nPowód: ${reason}`)
+      .catch(() => null);
+
     const logChannelId = await getBoundChannelId("LOG_PUNISHMENTS");
     if (logChannelId) {
       const channel = await guild.channels.fetch(logChannelId).catch(() => null);

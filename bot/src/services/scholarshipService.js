@@ -19,7 +19,7 @@ class ScholarshipService {
   }
 
   /** Przetwarza wszystkich studentów danego wydziału i wypłaca stypendia kwalifikującym się */
-  async runPayoutForFaculty(facultyId, { minGpa = DEFAULT_MIN_GPA, amountIC = DEFAULT_AMOUNT_IC } = {}) {
+  async runPayoutForFaculty(facultyId, { minGpa = DEFAULT_MIN_GPA, amountIC = DEFAULT_AMOUNT_IC } = {}, client = null) {
     const students = await prisma.character.findMany({ where: { facultyId } });
     const results = [];
 
@@ -34,6 +34,13 @@ class ScholarshipService {
         where: { userId: student.userId },
         data: { salaryIC: { increment: amountIC } },
       });
+
+      if (client) {
+        const user = await client.users.fetch(student.userId).catch(() => null);
+        await user
+          ?.send(`🎓 **Otrzymałeś/aś stypendium!** ${amountIC} IC za średnią ${gpa.toFixed(2)}.`)
+          .catch(() => null);
+      }
 
       results.push({ userId: student.userId, gpa, amountIC });
     }

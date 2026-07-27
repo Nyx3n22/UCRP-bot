@@ -8,12 +8,14 @@ export async function createRoleBinding(formData: FormData) {
   const permissionKey = String(formData.get("permissionKey") ?? "");
   const label = String(formData.get("label") ?? "").trim();
   const facultyId = String(formData.get("facultyId") ?? "") || null;
+  const studyYearRaw = String(formData.get("studyYear") ?? "").trim();
+  const studyYear = studyYearRaw ? Number(studyYearRaw) : null;
   if (!discordRoleId || !permissionKey || !label) return;
 
   await prisma.roleBinding.upsert({
     where: { discordRoleId_permissionKey: { discordRoleId, permissionKey } },
-    update: { label, facultyId },
-    create: { discordRoleId, permissionKey, label, facultyId },
+    update: { label, facultyId, studyYear },
+    create: { discordRoleId, permissionKey, label, facultyId, studyYear },
   });
   revalidatePath("/roles");
 }

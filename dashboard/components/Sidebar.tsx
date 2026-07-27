@@ -18,11 +18,13 @@ const NAV_SECTIONS = [
       { href: "/exams", label: "Egzaminy" },
       { href: "/syllabuses", label: "Sylabusy" },
       { href: "/library", label: "Biblioteka" },
+      { href: "/npcs", label: "Postacie NPC" },
     ],
   },
   {
     label: "Dane",
     items: [
+      { href: "/applications", label: "Podania" },
       { href: "/characters", label: "Baza postaci" },
       { href: "/logs", label: "Logi" },
     ],

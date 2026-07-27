@@ -33,7 +33,7 @@ module.exports = {
       if (!faculty) return interaction.reply({ content: `Nie znaleziono wydziału "${wydzial}".`, ephemeral: true });
 
       await interaction.deferReply();
-      const results = await scholarshipService.runPayoutForFaculty(faculty.id, { minGpa, amountIC: kwota });
+      const results = await scholarshipService.runPayoutForFaculty(faculty.id, { minGpa, amountIC: kwota }, interaction.client);
 
       if (results.length === 0) {
         return interaction.editReply(`Brak studentów spełniających próg GPA na wydziale **${wydzial}**.`);

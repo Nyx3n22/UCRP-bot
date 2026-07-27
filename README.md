@@ -143,11 +143,14 @@ Uwagi projektowe:
 
 ## Podania rekrutacyjne
 
-- `/podanie student|wykladowca|administracja` — otwiera Modal (max 5 pól, limit Discorda), zapisuje `Application` w bazie, wysyła embed z przyciskami **Akceptuj/Odrzuć** na kanał z `ChannelBinding` o kluczu `APPLICATIONS_<TYP>` (np. `APPLICATIONS_STUDENT`).
-- Rozpatrzenie wymaga uprawnienia `REVIEW_APPLICATIONS` (dodajcie odpowiedni `RoleBinding` w Dashboardzie).
-- Akceptacja automatycznie nadaje rolę powiązaną z kluczem `STUDENT_ROLE` / `WYKLADOWCA_ROLE` / `ADMINISTRACJA_ROLE` (też `RoleBinding`) i wysyła DM do zgłaszającego z wynikiem.
-- `/podanie moje` — student sprawdza status swoich podań.
-- Jeden nierozpatrzony wniosek danego typu na osobę na raz (blokada w `applicationService.submit`).
+**Przeniesione w całości do Dashboardu** (`dashboard/app/apply/`) — nie ma już komendy `/podanie` na Discordzie, bo Modal ma sztywny limit 5 pól, a web formularz nie ma żadnego limitu.
+
+- `https://twoj-dashboard.onrender.com/apply` — publiczna sekcja (wymaga tylko zalogowania przez Discord, **nie** wymaga `DASHBOARD_ACCESS`) z formularzami Student/Wykładowca/Administracja, dłuższymi niż to co dało się zmieścić w Modalu.
+- Po złożeniu: AI (Hugging Face, ten sam moduł co bramka czatu) generuje wstępną analizę zgłoszenia, potem embed z surowymi odpowiedziami + analizą AI + przyciskami **Akceptuj/Odrzuć** trafia na kanał `APPLICATIONS_<TYP>`.
+- Rozpatrzenie (przyciski) wciąż dzieje się na Discordzie — wymaga `REVIEW_APPLICATIONS`, akceptacja nadaje rolę (`STUDENT_ROLE`/`WYKLADOWCA_ROLE`/`ADMINISTRACJA_ROLE`).
+- `/apply/status` — student sprawdza status swoich podań (odpowiednik usuniętego `/podanie moje`).
+- `/applications` w panelu admina — wgląd w podania bez szukania na kanałach Discorda (tylko odczyt, rozpatrywanie zostaje na Discordzie).
+- Jeden nierozpatrzony wniosek danego typu na osobę na raz (blokada w `apply/actions.ts`).
 
 ## Integracje Social Media
 

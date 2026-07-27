@@ -63,6 +63,15 @@ class VerificationService {
 
   /** Krok 1: submit modala z danymi IC + nazwą Roblox -> generuje captchę */
   async handleModalSubmit(interaction) {
+    // Bramka 1: czy ta osoba jest już zweryfikowana?
+    const existingCharacter = await prisma.character.findUnique({ where: { userId: interaction.user.id } });
+    if (existingCharacter) {
+      return interaction.reply({
+        content: "❌ Masz już zweryfikowaną postać. Nie można weryfikować się ponownie (skontaktuj się z administracją, jeśli to pomyłka).",
+        ephemeral: true,
+      });
+    }
+
     const firstNameIC = interaction.fields.getTextInputValue("firstNameIC").trim();
     const lastNameIC = interaction.fields.getTextInputValue("lastNameIC").trim();
     const rawDate = interaction.fields.getTextInputValue("birthDateIC").trim();
@@ -79,6 +88,16 @@ class VerificationService {
     if (!robloxUser) {
       return interaction.editReply(
         `❌ Nie znaleziono użytkownika Roblox o nazwie "${robloxUsername}". Sprawdź pisownię i spróbuj weryfikacji od nowa.`
+      );
+    }
+
+    // Bramka 2: czy to konto Roblox jest już zweryfikowane przez kogoś innego?
+    const robloxAlreadyUsed = await prisma.discordUser.findFirst({
+      where: { robloxId: String(robloxUser.id), verifiedAt: { not: null } },
+    });
+    if (robloxAlreadyUsed) {
+      return interaction.editReply(
+        `❌ Konto Roblox "${robloxUser.name}" jest już powiązane z innym kontem Discord na tym serwerze. Jeśli to Twoje konto i uważasz że to pomyłka, skontaktuj się z administracją.`
       );
     }
 

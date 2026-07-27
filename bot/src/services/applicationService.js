@@ -1,8 +1,10 @@
 /**
  * services/applicationService.js
- * Realizuje pkt. 2 (Podania Rekrutacyjne): aplikacje na studentów/wykładowców/
- * administrację wypełniane w bocie (Modal), wysyłane na kanały ustawione
- * w Dashboardzie, rozpatrywane przyciskami Akceptuj/Odrzuć.
+ * Składanie podań przeniesione w całości do Dashboardu (publiczny formularz,
+ * bez limitu 5 pól jaki mają Modale Discorda, plus AI generuje wstępną analizę
+ * od razu po złożeniu). Ten serwis zajmuje się już tylko ROZPATRZENIEM podania,
+ * które wciąż dzieje się na Discordzie (przyciski Akceptuj/Odrzuć na embedzie
+ * wysłanym przez Dashboard).
  */
 
 const prisma = require("../lib/prisma");
@@ -15,17 +17,6 @@ const ROLE_ON_ACCEPT = {
 };
 
 class ApplicationService {
-  async submit(userId, type, answers) {
-    const pending = await prisma.application.findFirst({
-      where: { userId, type, status: "PENDING" },
-    });
-    if (pending) throw new Error("Masz już złożone i nierozpatrzone podanie tego typu.");
-
-    return prisma.application.create({
-      data: { userId, type, answers, status: "PENDING" },
-    });
-  }
-
   async review(applicationId, reviewerId, decision, guild) {
     const application = await prisma.application.findUnique({ where: { id: applicationId } });
     if (!application) throw new Error("Nie znaleziono podania.");
@@ -46,10 +37,6 @@ class ApplicationService {
     }
 
     return updated;
-  }
-
-  async myApplications(userId) {
-    return prisma.application.findMany({ where: { userId }, orderBy: { createdAt: "desc" } });
   }
 }
 
