@@ -1,29 +1,47 @@
 /**
  * config/channels.js
- * Analogicznie do roles.js — kanały przypisywane w Dashboardzie (ChannelBinding),
- * nigdy hardkodowane w kodzie bota.
+ * Obsługa ChannelBinding — mapowanie kluczy na ID kanałów Discord
  */
 
 const prisma = require("../lib/prisma");
 
-let cache = { bindings: new Map(), fetchedAt: 0 };
+let cache = { bindings: [], fetchedAt: 0 };
 const CACHE_TTL_MS = 60_000;
 
 async function loadBindings() {
-  if (Date.now() - cache.fetchedAt < CACHE_TTL_MS && cache.bindings.size > 0) {
+  if (Date.now() - cache.fetchedAt < CACHE_TTL_MS && cache.bindings.length > 0) {
     return cache.bindings;
   }
-  const rows = await prisma.channelBinding.findMany();
-  cache = { bindings: new Map(rows.map((r) => [r.key, r.channelId])), fetchedAt: Date.now() };
-  return cache.bindings;
+  try {
+    const bindings = await prisma.channelBinding.findMany();
+    cache = { bindings, fetchedAt: Date.now() };
+    return bindings;
+  } catch (err) {
+    console.error("[channels] Błąd przy pobieraniu ChannelBinding:", err.message);
+    return [];
+  }
 }
 
+/**
+ * Zwraca ID kanału dla danego klucza
+ */
 async function getBoundChannelId(key) {
   const bindings = await loadBindings();
-  return bindings.get(key) ?? null;
+  const binding = bindings.find((b) => b.key === key);
+  return binding?.channelId ?? null;
 }
 
-// alias historyczny - kanały zawsze były trzymane w tym miejscu
-const getChannelId = getBoundChannelId;
+/**
+ * Zwraca JSON z listy ID kanałów/ról
+ */
+async function getBoundChannelJson(key) {
+  const binding = await getBoundChannelId(key);
+  if (!binding) return null;
+  try {
+    return JSON.parse(binding);
+  } catch {
+    return null;
+  }
+}
 
-module.exports = { getBoundChannelId, getChannelId };
+module.exports = { getBoundChannelId, getBoundChannelJson };
