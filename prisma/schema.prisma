@@ -28,7 +28,10 @@ model DiscordUser {
   grades        Grade[]
   punishments   Punishment[]
   examAnswers   ExamAnswer[]
+  verificationReviews VerificationReview[] @relation("VerificationReviewer")
+  applicationReviews  ApplicationReview[] @relation("ApplicationReviewer")
   createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 }
 
 model RoleBinding {
@@ -45,7 +48,7 @@ model RoleBinding {
 
 model ChannelBinding {
   id         String @id @default(cuid())
-  key        String @unique // np. LOG_MOD, LOG_AI, APPLICATIONS_STUDENT, VERIFICATION, ANNOUNCEMENTS, TICKET_TRANSCRIPTS
+  key        String @unique // np. LOG_MOD, LOG_AI, APPLICATIONS_STUDENT, VERIFICATION, ANNOUNCEMENTS, TICKET_TRANSCRIPTS, VERIFICATION_REVIEW
   channelId  String
 }
 
@@ -53,14 +56,19 @@ model ChannelBinding {
 
 model AiConfig {
   id                String   @id @default("singleton")
-  provider          String   @default("huggingface") // WYŁĄCZNIE Hugging Face — pole zostaje dla przyszłej rozbudowy, ale kod bota nie obsługuje innych wartości
+  provider          String   @default("huggingface") // WYŁĄCZNIE Hugging Face
   apiKeyEncrypted   String   // token Hugging Face (hf_...), szyfrowany AES-256-GCM
-  chatModel         String   @default("meta-llama/Llama-3.1-8B-Instruct") // model do bramki AI (chat completions), edytowalny w Dashboardzie
-  premiumChatModel  String?  // opcjonalny, lepszy model dla ról z DONATE_UNLIMITED_AI - jeśli puste, używany jest zwykły chatModel
-  automodModel      String   @default("unitary/toxic-bert") // model klasyfikacyjny do automodu (text-classification)
-  automodThreshold  Float    @default(0.7) // próg pewności (0-1), powyżej którego wiadomość jest usuwana
+  chatModel         String   @default("meta-llama/Llama-3.1-8B-Instruct") // model do bramki AI (chat completions)
+  premiumChatModel  String?  // opcjonalny, lepszy model dla ról z DONATE_UNLIMITED_AI
+  automodModel      String   @default("unitary/toxic-bert") // model klasyfikacyjny do automodu
+  automodThreshold  Float    @default(0.7) // próg pewności (0-1)
   allowedChannelIds String[] // bramka AI tylko na tych kanałach
   automodEnabled    Boolean  @default(true)
+  // Nowe pola dla weryfikacji i aplikacji
+  verificationAnalysisModel String @default("facebook/bart-large-mnli") // MNLI do oceny logiczności danych
+  applicationAnalysisModel String @default("mistral-community/Mistral-7B-Instruct-v0.2") // model do analizy treści podań
+  verificationAiEnabled Boolean @default(true) // czy AI ma analizować dane weryfikacji
+  applicationAiEnabled Boolean @default(true)  // czy AI ma analizować podania
   updatedAt         DateTime @updatedAt
 }
 
@@ -80,6 +88,68 @@ model AiUsageLog {
   creditCost Float
   unlimited  Boolean     @default(false) // true jeśli rola donate pokryła koszt
   createdAt  DateTime    @default(now())
+}
+
+// ---------- WERYFIKACJA Z AI I MANUALNYM PRZEGLĄDEM ----------
+
+model VerificationAttempt {
+  id               String      @id @default(cuid())
+  userId           String      @unique
+  firstNameIC      String
+  lastNameIC       String
+  birthDateIC      DateTime
+  genderIC         Gender
+  robloxUserId     String
+  robloxUsername   String
+  
+  // AI analysis
+  aiAnalysis       String?     @db.Text // JSON z wynikami analizy AI
+  aiScore          Float?      // 0-1, jak "dobry" jest kandydat wg AI
+  aiFlags          String[]    // czerwone flagi: ["imie_podejrzane", "data_nierealistyczna", itp.]
+  aiAnalyzedAt     DateTime?
+  
+  // Status przepływu
+  status           VerificationStatus @default(PENDING_CAPTCHA) // PENDING_CAPTCHA -> PENDING_ROBLOX -> PENDING_AI_REVIEW -> PENDING_MANUAL_REVIEW -> VERIFIED / REJECTED
+  captchaVerified  Boolean     @default(false)
+  robloxVerified   Boolean     @default(false)
+  
+  // Recenzja manualna
+  manualReview     VerificationReview?
+  
+  createdAt        DateTime    @default(now())
+  expiresAt        DateTime    @default(dbgenerated("now() + interval '24 hours'"))
+  @@index([status, createdAt])
+}
+
+enum VerificationStatus {
+  PENDING_CAPTCHA      // czeka na wpisanie captchy
+  PENDING_ROBLOX       // czeka na potwierdzenie konta Roblox
+  PENDING_AI_REVIEW    // czeka na analizę AI
+  PENDING_MANUAL_REVIEW // czeka na manualny przegląd przez moderatora
+  VERIFIED             // zaakceptowana
+  REJECTED             // odrzucona
+  EXPIRED              // wygasła (24h limit)
+}
+
+model VerificationReview {
+  id              String      @id @default(cuid())
+  attempt         VerificationAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  attemptId       String      @unique
+  
+  reviewer        DiscordUser @relation("VerificationReviewer", fields: [reviewerId], references: [id])
+  reviewerId      String
+  
+  decision        VerificationDecision
+  reason          String?     @db.Text // dlaczego zaakceptowana/odrzucona
+  notes           String?     @db.Text // notatki moderatora
+  
+  createdAt       DateTime    @default(now())
+}
+
+enum VerificationDecision {
+  APPROVED
+  REJECTED
+  NEEDS_MORE_INFO
 }
 
 // ---------- POSTACIE / RP ----------
@@ -202,9 +272,9 @@ model AttendanceEntry {
   subjectId      String
   subject        Subject  @relation(fields: [subjectId], references: [id])
   studentId      String
-  lecturerId     String   // kto wpisał (do audytu, nie do wyświetlania studentowi)
+  lecturerId     String   // kto wpisał
   present        Boolean  @default(true)
-  activityPoints Int      @default(0) // punkty aktywności za tę sesję, wpisywane ręcznie
+  activityPoints Int      @default(0)
   sessionDate    DateTime @default(now())
   note           String?
 
@@ -327,10 +397,21 @@ model Application {
   userId     String
   type       ApplicationType
   answers    Json
-  aiAnalysis String?  @db.Text // wstępna analiza AI - generowana od razu po złożeniu, zanim trafi do ludzi
+  
+  // AI analysis (wstępna ocena)
+  aiAnalysis String?  @db.Text // JSON: sentiment, słowa kluczowe, sugestia
+  aiScore    Float?   // 0-1, jak "dobra" jest aplikacja wg AI
+  aiFlags    String[] // czerwone flagi: ["spam", "plagiacja_podejrzana", itp.]
+  aiAnalyzedAt DateTime?
+  
   status     ApplicationStatus @default(PENDING)
-  reviewedById String?
+  reviews    ApplicationReview[] // historia recenzji
+  reviewedById String? // ostatni recenzent
+  
   createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  
+  @@index([status, userId])
 }
 
 enum ApplicationType {
@@ -343,6 +424,22 @@ enum ApplicationStatus {
   PENDING
   ACCEPTED
   REJECTED
+  NEEDS_CLARIFICATION
+}
+
+model ApplicationReview {
+  id              String      @id @default(cuid())
+  application     Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  applicationId   String
+  
+  reviewer        DiscordUser @relation("ApplicationReviewer", fields: [reviewerId], references: [id])
+  reviewerId      String
+  
+  decision        ApplicationStatus // co zdecydował recenzent
+  feedback        String?     @db.Text // komentarz dla kandydata
+  internalNotes   String?     @db.Text // notatki dla zespołu (niewidoczne dla kandydata)
+  
+  createdAt       DateTime    @default(now())
 }
 
 // ---------- INTEGRACJE SOCIAL MEDIA ----------
@@ -352,8 +449,8 @@ model SocialMediaConfig {
   twitchClientId                  String?
   twitchClientSecretEncrypted     String?
   youtubeApiKeyEncrypted          String?
-  instagramAccessTokenEncrypted   String? // token Graph API dla konta Business/Creator
-  twitterBearerTokenEncrypted     String? // opcjonalne — wymaga płatnego tieru X API v2
+  instagramAccessTokenEncrypted   String?
+  twitterBearerTokenEncrypted     String?
   pollIntervalMinutes             Int      @default(5)
   updatedAt                       DateTime @updatedAt
 }
@@ -361,7 +458,7 @@ model SocialMediaConfig {
 model SocialMediaSubscription {
   id               String         @id @default(cuid())
   platform         SocialPlatform
-  externalHandle   String         // nazwa kanału Twitch, ID kanału YouTube, IG user ID, @handle X/TikTok
+  externalHandle   String
   discordChannelId String
   lastSeenId       String?
   enabled          Boolean        @default(true)
@@ -375,7 +472,7 @@ model SocialMediaSubscription {
 model NpcCharacter {
   id          String   @id @default(cuid())
   name        String   @unique
-  personality String   @db.Text // opis osobowości/backstory - staje się system promptem dla AI
+  personality String   @db.Text
   avatarUrl   String?
   active      Boolean  @default(true)
   createdAt   DateTime @default(now())
@@ -393,11 +490,13 @@ enum SocialPlatform {
 
 model VerificationConfig {
   id                String   @id @default("singleton")
-  captchaCodeLength Int      @default(6)  // długość kodu na obrazku captcha
-  robloxCodeLength  Int      @default(8)  // długość kodu wklejanego w opisie profilu Roblox
+  captchaCodeLength Int      @default(6)
+  robloxCodeLength  Int      @default(8)
   panelTitle        String   @default("🎓 Weryfikacja — Uniwersytet Centralny RP")
-  panelDescription  String   @default("Kliknij przycisk poniżej, aby rozpocząć weryfikację. Podasz Imię i Nazwisko IC oraz datę urodzenia, przejdziesz captchę, a na końcu połączymy Twoje konto z Robloxem.") @db.Text
+  panelDescription  String   @default("Kliknij przycisk poniżej, aby rozpocząć weryfikację. Podasz Imię i Nazwisko IC oraz datę urodzenia, przejdziesz captchę, a na końcu połączymy Twoje konto z Robloxem.")
   robloxInstructions String  @default("Wejdź na swój profil Roblox → Edytuj profil → Opis (About), wklej podany kod, zapisz zmiany, wróć tutaj i kliknij \"Sprawdź teraz\".") @db.Text
+  manualReviewRequired Boolean @default(true) // czy wymaga recenzji manualnej przed VERIFIED
+  aiReviewRequired Boolean @default(true)     // czy wymaga analizy AI
   updatedAt         DateTime @updatedAt
 }
 
@@ -405,7 +504,7 @@ model VerificationConfig {
 
 model ReactionRoleGroup {
   id          String               @id @default(cuid())
-  key         String               @unique // np. "wydzialy", "powiadomienia" - używane w /autorole panel [grupa]
+  key         String               @unique
   title       String
   description String?              @db.Text
   options     ReactionRoleOption[]
@@ -416,7 +515,7 @@ model ReactionRoleOption {
   id             String            @id @default(cuid())
   groupId        String
   group          ReactionRoleGroup @relation(fields: [groupId], references: [id])
-  discordRoleIds String[]          // jeden przycisk może nadawać/zdejmować kilka ról naraz
+  discordRoleIds String[]
   label          String
   emoji          String?
   style          ButtonStyleOption @default(SECONDARY)
@@ -439,4 +538,22 @@ model ActionLog {
   targetId  String?
   metadata  Json?
   createdAt DateTime @default(now())
+  
+  @@index([action, createdAt])
+}
+
+// ---------- DIAGNOSTYKA I BŁĘDY ----------
+
+model ErrorLog {
+  id            String   @id @default(cuid())
+  service       String   // np. "verificationService", "applicationService"
+  errorType     String   // np. "CAPTCHA_FAILED", "AI_TIMEOUT"
+  message       String   @db.Text
+  stackTrace    String?  @db.Text
+  context       Json?    // dodatkowe dane (userId, aplikacjaId, itp.)
+  severity      String   @default("INFO") // INFO, WARNING, ERROR, CRITICAL
+  resolved      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  
+  @@index([service, severity, createdAt])
 }
