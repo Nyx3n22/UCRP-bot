@@ -1,13 +1,15 @@
 /**
  * events/interactionCreate.js
  * Centralny router: slash commands, modale, przyciski.
+ * ULEPSZONY: obsługa nowych przycisków weryfikacji V2 i aplikacji z AI
  */
 
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
-const verificationService = require("../services/verificationService");
-const applicationService = require("../services/applicationService");
+const verificationServiceV2 = require("../services/verificationServiceV2");
+const applicationServiceV2 = require("../services/applicationServiceV2");
 const { getBoundChannelId } = require("../config/channels");
 const { hasPermission } = require("../config/roles");
+const { logError } = require("../utils/logger");
 
 module.exports = {
   name: "interactionCreate",
@@ -19,26 +21,119 @@ module.exports = {
         return command.execute(interaction);
       }
 
+      // ========== WERYFIKACJA V2 ==========
       if (interaction.isButton() && interaction.customId === "start_verification") {
-        return interaction.showModal(verificationService.buildModal());
+        return interaction.showModal(verificationServiceV2.buildModal());
       }
 
-      if (interaction.isModalSubmit() && interaction.customId === "verify_modal") {
-        return verificationService.handleModalSubmit(interaction);
+      if (interaction.isModalSubmit() && interaction.customId === "verify_modal_v2") {
+        return verificationServiceV2.handleModalSubmit(interaction);
       }
 
       if (interaction.isButton() && interaction.customId === "verify_captcha_button") {
-        return interaction.showModal(verificationService.buildCaptchaModal());
+        return interaction.showModal(verificationServiceV2.buildCaptchaModal());
       }
 
-      if (interaction.isModalSubmit() && interaction.customId === "verify_captcha_modal") {
-        return verificationService.handleCaptchaModalSubmit(interaction);
+      if (interaction.isModalSubmit() && interaction.customId === "verify_captcha_modal_v2") {
+        return verificationServiceV2.handleCaptchaModalSubmit(interaction);
       }
 
       if (interaction.isButton() && interaction.customId === "verify_roblox_check_button") {
-        return verificationService.handleRobloxCheckButton(interaction);
+        return verificationServiceV2.handleRobloxCheckButton(interaction);
       }
 
+      // ========== RECENZJA WERYFIKACJI ==========
+      if (interaction.isButton() && interaction.customId.startsWith("verification_accept:")) {
+        if (!(await hasPermission(interaction.member, "MODERATE"))) {
+          return interaction.reply({
+            content: "❌ Brak uprawnień do rozpatrywania weryfikacji.",
+            ephemeral: true,
+          });
+        }
+        const attemptId = interaction.customId.split(":")[1];
+        return verificationServiceV2.handleManualReviewDecision(interaction, attemptId, "APPROVED");
+      }
+
+      if (interaction.isButton() && interaction.customId.startsWith("verification_reject:")) {
+        if (!(await hasPermission(interaction.member, "MODERATE"))) {
+          return interaction.reply({
+            content: "❌ Brak uprawnień do rozpatrywania weryfikacji.",
+            ephemeral: true,
+          });
+        }
+        const attemptId = interaction.customId.split(":")[1];
+        return verificationServiceV2.handleManualReviewDecision(interaction, attemptId, "REJECTED");
+      }
+
+      if (interaction.isButton() && interaction.customId.startsWith("verification_moreinfo:")) {
+        if (!(await hasPermission(interaction.member, "MODERATE"))) {
+          return interaction.reply({
+            content: "❌ Brak uprawnień do rozpatrywania weryfikacji.",
+            ephemeral: true,
+          });
+        }
+        const attemptId = interaction.customId.split(":")[1];
+        return verificationServiceV2.handleManualReviewDecision(interaction, attemptId, "NEEDS_MORE_INFO");
+      }
+
+      // ========== APLIKACJE V2 Z AI ==========
+      if (interaction.isButton() && (interaction.customId.startsWith("application_accept:") || interaction.customId.startsWith("application_reject:"))) {
+        if (!(await hasPermission(interaction.member, "REVIEW_APPLICATIONS"))) {
+          return interaction.reply({
+            content: "❌ Brak uprawnień do rozpatrywania podań.",
+            ephemeral: true,
+          });
+        }
+
+        const [action, applicationId] = interaction.customId.split(":");
+        const decision = action === "application_accept" ? "ACCEPTED" : "REJECTED";
+
+        try {
+          const application = await applicationServiceV2.review(
+            applicationId,
+            interaction.user.id,
+            decision,
+            interaction.guild,
+            interaction.message?.embeds?.[0]?.description || ""
+          );
+
+          const disabledRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("noop_accept")
+              .setLabel("✅ Zaakceptowano")
+              .setStyle(ButtonStyle.Success)
+              .setDisabled(true),
+            new ButtonBuilder()
+              .setCustomId("noop_reject")
+              .setLabel("❌ Odrzucono")
+              .setStyle(ButtonStyle.Danger)
+              .setDisabled(true)
+          );
+          await interaction.update({ components: [disabledRow] });
+
+          await interaction.followUp({
+            content: `${decision === "ACCEPTED" ? "✅ Podanie zaakceptowane" : "❌ Podanie odrzucone"} przez <@${interaction.user.id}>.`,
+          });
+
+          const applicant = await interaction.client.users.fetch(application.userId).catch(() => null);
+          await applicant
+            ?.send(
+              decision === "ACCEPTED"
+                ? "🎉 Twoje podanie zostało zaakceptowane! Sprawdź swoje role na serwerze."
+                : "Twoje podanie zostało odrzucone. Możesz spróbować ponownie w przyszłości."
+            )
+            .catch(() => null);
+        } catch (err) {
+          await logError("interactionCreate", "APPLICATION_REVIEW_ERROR", err.message, {
+            userId: interaction.user.id,
+            applicationId,
+          });
+          return interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
+        }
+        return;
+      }
+
+      // ========== USOS PANEL ==========
       if (interaction.isButton() && interaction.customId.startsWith("usos_panel:")) {
         const action = interaction.customId.split(":")[1];
         const usosCommand = interaction.client.commands.get("usos");
@@ -134,46 +229,10 @@ module.exports = {
         return interaction.reply({ content: "✅ Ogłoszenie Dziekanatu opublikowane.", ephemeral: true });
       }
 
-      if (interaction.isButton() && (interaction.customId.startsWith("application_accept:") || interaction.customId.startsWith("application_reject:"))) {
-        if (!(await hasPermission(interaction.member, "REVIEW_APPLICATIONS"))) {
-          return interaction.reply({ content: "❌ Brak uprawnień do rozpatrywania podań.", ephemeral: true });
-        }
-
-        const [action, applicationId] = interaction.customId.split(":");
-        const decision = action === "application_accept" ? "ACCEPTED" : "REJECTED";
-
-        try {
-          const application = await applicationService.review(applicationId, interaction.user.id, decision, interaction.guild);
-
-          const disabledRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId("noop_accept").setLabel("Akceptuj").setStyle(ButtonStyle.Success).setDisabled(true),
-            new ButtonBuilder().setCustomId("noop_reject").setLabel("Odrzuć").setStyle(ButtonStyle.Danger).setDisabled(true)
-          );
-          await interaction.update({ components: [disabledRow] });
-
-          await interaction.followUp({
-            content: `${decision === "ACCEPTED" ? "✅ Podanie zaakceptowane" : "❌ Podanie odrzucone"} przez <@${interaction.user.id}>.`,
-          });
-
-          const applicant = await interaction.client.users.fetch(application.userId).catch(() => null);
-          await applicant
-            ?.send(
-              decision === "ACCEPTED"
-                ? "🎉 Twoje podanie zostało zaakceptowane! Sprawdź swoje role na serwerze."
-                : "Twoje podanie zostało odrzucone. Możesz spróbować ponownie w przyszłości."
-            )
-            .catch(() => null);
-        } catch (err) {
-          return interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
-        }
-        return;
-      }
-
-      // Reaction Role / Autorole przez przyciski, obsługiwane generycznie
+      // ========== REACTION ROLE / AUTOROLE ==========
       if (interaction.isButton() && interaction.customId.startsWith("reactionrole:")) {
         const roleIds = interaction.customId.split(":")[1].split(",").filter(Boolean);
         const member = interaction.member;
-        // "ma" liczymy po PIERWSZEJ roli z listy - jeśli ktoś ma choć jedną, traktujemy jako "ma cały zestaw"
         const has = roleIds.some((id) => member.roles.cache.has(id));
 
         try {
@@ -187,17 +246,23 @@ module.exports = {
             ephemeral: true,
           });
         } catch (err) {
-          console.error(`[reactionrole] Nie udało się zmienić ról ${roleIds.join(",")}:`, err.message);
+          await logError("interactionCreate", "REACTION_ROLE_ERROR", err.message, { roleIds: roleIds.join(",") });
           return interaction.reply({
             content:
-              "❌ Nie udało się zmienić roli/ról. Najczęstsza przyczyna: rola bota na serwerze jest ustawiona NIŻEJ niż któraś z tych ról w hierarchii ról (Ustawienia serwera → Role → przeciągnij rolę bota wyżej niż wszystkie role, które ma nadawać).",
+              "❌ Nie udało się zmienić roli/ról. Najczęstsza przyczyna: rola bota na serwerze jest ustawiona NIŻEJ niż któraś z tych ról.",
             ephemeral: true,
           });
         }
       }
     } catch (err) {
-      console.error("[interactionCreate] Błąd:", err);
-      const payload = { content: "❌ Wystąpił błąd podczas przetwarzania interakcji.", ephemeral: true };
+      await logError("interactionCreate", "GENERAL_ERROR", err.message, {
+        userId: interaction.user.id,
+        stack: err.stack,
+      });
+      const payload = {
+        content: "❌ Wystąpił błąd podczas przetwarzania interakcji.",
+        ephemeral: true,
+      };
       if (interaction.deferred || interaction.replied) {
         await interaction.editReply(payload).catch(() => null);
       } else {
