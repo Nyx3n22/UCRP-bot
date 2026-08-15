@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { submitApplication } from "../actions";
+import { submitApplication } from "./actions";
 
 type Field = {
   name: string;
