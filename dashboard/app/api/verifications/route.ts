@@ -7,7 +7,7 @@ import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
-import { ApplicationStatus, Prisma } from '@prisma/client';
+import { VerificationStatus, Prisma } from '@prisma/client';
 
 export async function GET(req: NextRequest) {
   try {
@@ -15,17 +15,17 @@ export async function GET(req: NextRequest) {
     if (!session?.user?.discordId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     // Sprawdź uprawnienia
-    const hasPerm = await hasPermission(session.user.discordId, 'REVIEW_APPLICATIONS');
+    const hasPerm = await hasPermission(session.user.discordId, 'MODERATE');
     if (!hasPerm) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
     const statusParam = req.nextUrl.searchParams.get('status') || 'all';
-    const isValidStatus = (Object.values(ApplicationStatus) as string[]).includes(statusParam);
+    const isValidStatus = (Object.values(VerificationStatus) as string[]).includes(statusParam);
 
-    const where: Prisma.ApplicationWhereInput =
+    const where: Prisma.VerificationAttemptWhereInput =
       statusParam === 'all' || !isValidStatus
         ? {}
-        : { status: statusParam as ApplicationStatus };
-
+        : { status: statusParam as VerificationStatus };
+    
     const verifications = await prisma.verificationAttempt.findMany({
       where,
       include: {
