@@ -6,15 +6,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth/next';
+import { authOptions } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession();
-    if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.discordId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    
     // Sprawdź uprawnienia
-    const hasPerm = await hasPermission(session.user.id, 'REVIEW_APPLICATIONS');
+    const hasPerm = await hasPermission(session.user.discordId, 'REVIEW_APPLICATIONS'); // lub 'MODERATE' w verifications
     if (!hasPerm) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
     const status = req.nextUrl.searchParams.get('status') || 'all';
