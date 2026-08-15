@@ -6,7 +6,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { EmbedBuilder } from 'discord.js';
 
 interface VerificationAttempt {
   id: string;
