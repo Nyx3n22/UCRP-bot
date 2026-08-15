@@ -2,12 +2,12 @@
  * dashboard/app/api/verifications/route.ts
  * Endpoint do pobierania weryfikacji z filtrowaniem
  */
-
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
+import { ApplicationStatus, Prisma } from '@prisma/client';
 
 export async function GET(req: NextRequest) {
   try {
@@ -15,12 +15,16 @@ export async function GET(req: NextRequest) {
     if (!session?.user?.discordId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     // Sprawdź uprawnienia
-    const hasPerm = await hasPermission(session.user.discordId, 'MODERATE');
+    const hasPerm = await hasPermission(session.user.discordId, 'REVIEW_APPLICATIONS');
     if (!hasPerm) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-    const status = req.nextUrl.searchParams.get('status') || 'all';
+    const statusParam = req.nextUrl.searchParams.get('status') || 'all';
+    const isValidStatus = (Object.values(ApplicationStatus) as string[]).includes(statusParam);
 
-    const where = status === 'all' ? {} : { status };
+    const where: Prisma.ApplicationWhereInput =
+      statusParam === 'all' || !isValidStatus
+        ? {}
+        : { status: statusParam as ApplicationStatus };
 
     const verifications = await prisma.verificationAttempt.findMany({
       where,
