@@ -6,12 +6,12 @@
 
 generator client {
   provider = "prisma-client-js"
-  output   = "../bot/node_modules/@prisma/client"
+  output   = "../bot/node_modules/.prisma/client"
 }
 
 generator dashboardClient {
   provider = "prisma-client-js"
-  output   = "../dashboard/node_modules/@prisma/client"
+  output   = "../dashboard/node_modules/.prisma/client"
 }
 
 datasource db {
