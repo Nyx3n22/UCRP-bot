@@ -114,12 +114,37 @@ class VerificationServiceV2 {
       }
 
       // Bramka 2: czy nie ma już aktywnej próby weryfikacji?
-      const existingAttempt = await prisma.verificationAttempt.findUnique({
+      let existingAttempt = await prisma.verificationAttempt.findUnique({
         where: { userId: interaction.user.id },
       });
+
+      // Jeśli próba istnieje, nie jest jeszcze oznaczona jako EXPIRED/REJECTED,
+      // ale minęło już 24h (pole expiresAt) - wygasła "leniwie", w tym miejscu:
+      // oznaczamy ją w bazie jako EXPIRED i pozwalamy zacząć od nowa, zamiast
+      // blokować użytkownika w nieskończoność, gdyby moderator nigdy nie
+      // zdążył jej rozpatrzyć.
+      if (
+        existingAttempt &&
+        existingAttempt.status !== "EXPIRED" &&
+        existingAttempt.status !== "REJECTED" &&
+        existingAttempt.expiresAt &&
+        existingAttempt.expiresAt.getTime() < Date.now()
+      ) {
+        await prisma.verificationAttempt.update({
+          where: { userId: interaction.user.id },
+          data: { status: "EXPIRED" },
+        });
+        existingAttempt = null;
+      }
+
       if (existingAttempt && existingAttempt.status !== "EXPIRED" && existingAttempt.status !== "REJECTED") {
+        const unlockAt = existingAttempt.expiresAt
+          ? `<t:${Math.floor(existingAttempt.expiresAt.getTime() / 1000)}:R>`
+          : "za jakiś czas";
         return interaction.editReply({
-          content: "❌ Masz już aktywną próbę weryfikacji w toku. Spróbuj za godzinę lub skontaktuj się z supportem.",
+          content:
+            `❌ Masz już aktywną próbę weryfikacji w toku. Będzie można spróbować ponownie ${unlockAt}, ` +
+            `chyba że moderator ją wcześniej rozpatrzy. Możesz też skontaktować się z supportem.`,
         });
       }
 
@@ -395,14 +420,26 @@ class VerificationServiceV2 {
           aiFlags,
           aiAnalyzedAt: new Date(),
           status: config.manualReviewRequired ? "PENDING_MANUAL_REVIEW" : "VERIFIED",
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
         },
         update: {
+          firstNameIC: pending.firstNameIC,
+          lastNameIC: pending.lastNameIC,
+          birthDateIC: pending.birthDate,
+          genderIC,
+          robloxUserId: String(pending.robloxUserId),
+          robloxUsername: pending.robloxUsername,
+          captchaVerified: true,
           robloxVerified: true,
           aiAnalysis: JSON.stringify(aiAnalysis || {}),
           aiScore,
           aiFlags,
           aiAnalyzedAt: new Date(),
           status: config.manualReviewRequired ? "PENDING_MANUAL_REVIEW" : "VERIFIED",
+          // Ta próba to w praktyce nowe podejście (poprzednia mogła być EXPIRED/REJECTED),
+          // więc odświeżamy 24h licznik - inaczej dbgenerated default zadziałałby
+          // tylko przy INSERT, a nie przy tym UPDATE.
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
         },
       });
 
