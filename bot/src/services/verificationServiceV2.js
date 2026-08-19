@@ -605,14 +605,25 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
    * Przygotowanie logiki dla obsługi przycisków recenzji (w interactionCreate)
    */
   async handleManualReviewDecision(interaction, attemptId, decision) {
+    // Ta funkcja robi mnóstwo operacji (kilka zapytań do bazy, pobranie roli,
+    // pobranie membera, dodanie roli, wysłanie DM) zanim cokolwiek odpowie
+    // Discordowi. Bez natychmiastowego deferReply token interakcji wygasa
+    // (limit 3s) zanim dotrzemy do jakiegokolwiek reply - stąd "Aplikacja nie
+    // odpowiedziała na czas". Od teraz wszystko poniżej używa editReply.
+    try {
+      await interaction.deferReply({ ephemeral: true });
+    } catch (err) {
+      await logError("verificationService", "DEFER_FAILED", err.message, { userId: interaction.user.id, stack: err.stack }).catch(() => null);
+      return;
+    }
+
     try {
       // Sprawdzenie uprawnień - bez tego każdy, kto widzi przyciski na kanale
       // recenzji, mógłby zaakceptować/odrzucić cudzą weryfikację.
       const allowed = await hasPermission(interaction.member, "MODERATE");
       if (!allowed) {
-        return interaction.reply({
+        return interaction.editReply({
           content: "❌ Nie masz uprawnień do rozpatrywania weryfikacji.",
-          ephemeral: true,
         });
       }
 
@@ -621,13 +632,12 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
       });
 
       if (!attempt) {
-        return interaction.reply({ content: "❌ Nie znaleziono weryfikacji.", ephemeral: true });
+        return interaction.editReply({ content: "❌ Nie znaleziono weryfikacji." });
       }
 
       if (attempt.status === "VERIFIED" || attempt.status === "REJECTED") {
-        return interaction.reply({
+        return interaction.editReply({
           content: "❌ Ta weryfikacja została już rozpatrzona.",
-          ephemeral: true,
         });
       }
 
@@ -686,7 +696,7 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
         await user?.send("🎉 Twoja weryfikacja została zaakceptowana! Masz już dostęp do pełnego serwera.").catch(() => null);
 
         await logAction("verification_approved_manual", attempt.userId, interaction.user.id, { attemptId });
-        return interaction.reply({ content: "✅ Weryfikacja zaakceptowana.", ephemeral: true });
+        return interaction.editReply({ content: "✅ Weryfikacja zaakceptowana." });
       } else if (decision === "REJECTED") {
         await prisma.verificationAttempt.update({
           where: { id: attemptId },
@@ -708,7 +718,7 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
           .catch(() => null);
 
         await logAction("verification_rejected_manual", attempt.userId, interaction.user.id, { attemptId });
-        return interaction.reply({ content: "❌ Weryfikacja odrzucona.", ephemeral: true });
+        return interaction.editReply({ content: "❌ Weryfikacja odrzucona." });
       } else if (decision === "NEEDS_MORE_INFO") {
         await prisma.verificationAttempt.update({
           where: { id: attemptId },
@@ -725,9 +735,8 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
         });
 
         await logAction("verification_needs_info", attempt.userId, interaction.user.id, { attemptId });
-        return interaction.reply({
+        return interaction.editReply({
           content: "❓ Wysłano pytanie do kandydata. Czeka na odpowiedź.",
-          ephemeral: true,
         });
       }
     } catch (err) {
@@ -736,7 +745,7 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
         attemptId,
         stack: err.stack,
       });
-      await interaction.reply("❌ Błąd podczas przetwarzania decyzji.").catch(() => null);
+      await interaction.editReply("❌ Błąd podczas przetwarzania decyzji.").catch(() => null);
     }
   }
 
