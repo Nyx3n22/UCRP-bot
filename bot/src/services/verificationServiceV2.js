@@ -18,7 +18,7 @@ const prisma = require("../lib/prisma");
 const { generatePesel } = require("./peselGenerator");
 const { generateCaptcha } = require("../utils/captcha");
 const robloxClient = require("./robloxClient");
-const { getRoleIdForPermission } = require("../config/roles");
+const { getRoleIdForPermission, hasPermission } = require("../config/roles");
 const { generateAiReply } = require("./aiGatewayService");
 const { logError, logAction } = require("../utils/logger");
 
@@ -88,15 +88,28 @@ class VerificationServiceV2 {
    * Krok 1: Submit modala — walidacja danych i generacja captchy
    */
   async handleModalSubmit(interaction) {
+    // Potwierdzamy interakcję NATYCHMIAST, zanim zrobimy jakiekolwiek zapytania
+    // do bazy. Discord daje tylko ~3s na ack — jeśli baza (Neon) właśnie
+    // "budzi się" po bezczynności, te 3s łatwo przekroczyć, token wygasa,
+    // i użytkownik dostaje generyczny błąd klienta Discorda zamiast naszego
+    // komunikatu. Od teraz WSZYSTKO poniżej używa editReply, nigdy reply.
+    try {
+      await interaction.deferReply({ ephemeral: true });
+    } catch (err) {
+      // Jeśli nawet to się nie uda (naprawdę rzadkie), nic więcej nie zrobimy -
+      // nie ma czego edytować.
+      await logError("verificationService", "DEFER_FAILED", err.message, { userId: interaction.user.id, stack: err.stack }).catch(() => null);
+      return;
+    }
+
     try {
       // Bramka 1: czy już zweryfikowany?
       const existingCharacter = await prisma.character.findUnique({
         where: { userId: interaction.user.id },
       });
       if (existingCharacter) {
-        return interaction.reply({
+        return interaction.editReply({
           content: "❌ Masz już zweryfikowaną postać. Nie można weryfikować się ponownie.",
-          ephemeral: true,
         });
       }
 
@@ -105,9 +118,8 @@ class VerificationServiceV2 {
         where: { userId: interaction.user.id },
       });
       if (existingAttempt && existingAttempt.status !== "EXPIRED" && existingAttempt.status !== "REJECTED") {
-        return interaction.reply({
+        return interaction.editReply({
           content: "❌ Masz już aktywną próbę weryfikacji w toku. Spróbuj za godzinę lub skontaktuj się z supportem.",
-          ephemeral: true,
         });
       }
 
@@ -120,9 +132,8 @@ class VerificationServiceV2 {
       const birthDate = this._parseDate(rawDate);
       if (!birthDate) {
         await logError("verificationService", "INVALID_DATE_FORMAT", `Użytkownik ${interaction.user.id} podał błędną datę: ${rawDate}`, { userId: interaction.user.id });
-        return interaction.reply({
-          content: "❌ Nieprawidłowy format daty. Użyj DD.MM.RRRR (np. 14.03.2001).",
-          ephemeral: true,
+        return interaction.editReply({
+          content: "❌ Nieprawidłowy format daty. Użyj DD.MM.RRRR z prawdziwą datą (np. 14.03.2001).",
         });
       }
 
@@ -130,21 +141,17 @@ class VerificationServiceV2 {
       const age = this._calculateAge(birthDate);
       if (age < 13) {
         await logError("verificationService", "AGE_TOO_LOW", `Użytkownik ${interaction.user.id} za młody: ${age} lat`, { userId: interaction.user.id, age });
-        return interaction.reply({
+        return interaction.editReply({
           content: "❌ Musisz mieć co najmniej 13 lat, aby się zweryfikować.",
-          ephemeral: true,
         });
       }
 
       if (age > 120) {
         await logError("verificationService", "AGE_TOO_HIGH", `Użytkownik ${interaction.user.id} za stary: ${age} lat`, { userId: interaction.user.id, age });
-        return interaction.reply({
+        return interaction.editReply({
           content: "❌ Wpisana data urodzenia wydaje się nieprawidłowa (za dawno temu).",
-          ephemeral: true,
         });
       }
-
-      await interaction.deferReply({ ephemeral: true });
 
       // Weryfikacja konta Roblox
       const robloxUser = await robloxClient.getUserIdByUsername(robloxUsername).catch((err) => {
@@ -562,6 +569,16 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
    */
   async handleManualReviewDecision(interaction, attemptId, decision) {
     try {
+      // Sprawdzenie uprawnień - bez tego każdy, kto widzi przyciski na kanale
+      // recenzji, mógłby zaakceptować/odrzucić cudzą weryfikację.
+      const allowed = await hasPermission(interaction.member, "MODERATE");
+      if (!allowed) {
+        return interaction.reply({
+          content: "❌ Nie masz uprawnień do rozpatrywania weryfikacji.",
+          ephemeral: true,
+        });
+      }
+
       const attempt = await prisma.verificationAttempt.findUnique({
         where: { id: attemptId },
       });
@@ -701,9 +718,31 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
   _parseDate(raw) {
     const match = raw.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
     if (!match) return null;
-    const [, dd, mm, yyyy] = match;
-    const date = new Date(Number(yyyy), Number(mm) - 1, Number(dd));
-    return Number.isNaN(date.getTime()) ? null : date;
+
+    const dd = Number(match[1]);
+    const mm = Number(match[2]);
+    const yyyy = Number(match[3]);
+
+    // Zakresy z grubsza (miesiąc 1-12, dzień 1-31, rok w rozsądnych granicach)
+    // zanim w ogóle spróbujemy zbudować obiekt Date.
+    const currentYear = new Date().getFullYear();
+    if (mm < 1 || mm > 12) return null;
+    if (dd < 1 || dd > 31) return null;
+    if (yyyy < currentYear - 120 || yyyy > currentYear) return null;
+
+    const date = new Date(yyyy, mm - 1, dd);
+    if (Number.isNaN(date.getTime())) return null;
+
+    // JS Date "przewija" nieprawidłowe kombinacje (np. 30 lutego -> 2 marca)
+    // zamiast rzucić błąd. Sprawdzamy, że to co odczytaliśmy z powrotem
+    // faktycznie zgadza się z tym, co wpisał użytkownik - to łapie właśnie
+    // takie przypadki jak 30.02.2001 czy (przy braku wcześniejszych limitów)
+    // rollover miesięcy/dni poza zakres.
+    if (date.getFullYear() !== yyyy || date.getMonth() !== mm - 1 || date.getDate() !== dd) {
+      return null;
+    }
+
+    return date;
   }
 
   _calculateAge(birthDate) {
