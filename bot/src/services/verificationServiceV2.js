@@ -279,7 +279,7 @@ class VerificationServiceV2 {
 
       pending.captchaVerified = true;
       const config = await this._getConfig();
-      pending.verificationCode = randomCode(config.robloxCodeLength);
+      pending.verificationCode = `UC-${randomCode(config.robloxCodeLength)}`;
 
       const embed = new EmbedBuilder()
         .setTitle("🎮 Ostatni krok — potwierdź konto Roblox (Krok 3/3)")
