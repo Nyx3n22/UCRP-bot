@@ -356,7 +356,7 @@ class VerificationServiceV2 {
       let aiScore = 0.95; // domyślnie wysoki score
       let aiFlags = [];
 
-      if (config.verificationAiEnabled) {
+      if (config.aiReviewRequired) {
         aiAnalysis = await this._analyzeVerificationWithAi(
           pending.firstNameIC,
           pending.lastNameIC,
@@ -709,6 +709,8 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
       config ?? {
         captchaCodeLength: 6,
         robloxCodeLength: 8,
+        robloxInstructions:
+          'Wejdź na swój profil Roblox → Edytuj profil → Opis (About), wklej podany kod, zapisz zmiany, wróć tutaj i kliknij "Sprawdź teraz".',
         manualReviewRequired: true,
         aiReviewRequired: true,
       }
