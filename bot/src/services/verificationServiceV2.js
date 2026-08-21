@@ -605,17 +605,15 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
    * Przygotowanie logiki dla obsługi przycisków recenzji (w interactionCreate)
    */
   async handleManualReviewDecision(interaction, attemptId, decision) {
-    // Ta funkcja robi mnóstwo operacji zanim odpowie Discordowi.
-    // Używamy deferReply, aby token interakcji nie wygasł (limit 3s).
     try {
-      await interaction.deferReply({ ephemeral: true });
+      // ZMIANA 1: Użycie flags: 64 zamiast ephemeral: true pozbywa się ostrzeżenia (warningu) z konsoli
+      await interaction.deferReply({ flags: 64 });
     } catch (err) {
       await logError("verificationService", "DEFER_FAILED", err.message, { userId: interaction.user.id, stack: err.stack }).catch(() => null);
       return;
     }
 
     try {
-      // Sprawdzenie uprawnień - zabezpiecza przed klikaniem przez zwykłych graczy
       const allowed = await hasPermission(interaction.member, "MODERATE");
       if (!allowed) {
         return interaction.editReply({
@@ -637,6 +635,11 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
         });
       }
 
+      // ZMIANA 3 (Przygotowanie): Pobieramy stary embed z wiadomości, aby go edytować
+      const originalEmbed = interaction.message.embeds[0] 
+        ? EmbedBuilder.from(interaction.message.embeds[0]) 
+        : null;
+
       if (decision === "APPROVED") {
         const genderIC = this._inferGenderFromName(attempt.firstNameIC);
         const pesel = generatePesel(attempt.birthDateIC, genderIC);
@@ -656,8 +659,17 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
           },
         });
 
-        await prisma.character.create({
-          data: {
+        // ZMIANA 2: Używamy upsert zamiast create, co naprawia błąd Unique constraint failed (userId)
+        await prisma.character.upsert({
+          where: { userId: attempt.userId },
+          update: {
+            firstNameIC: attempt.firstNameIC,
+            lastNameIC: attempt.lastNameIC,
+            birthDateIC: attempt.birthDateIC,
+            genderIC: attempt.genderIC,
+            pesel,
+          },
+          create: {
             userId: attempt.userId,
             firstNameIC: attempt.firstNameIC,
             lastNameIC: attempt.lastNameIC,
@@ -673,8 +685,6 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
           await member?.roles.add(verifiedRoleId).catch(() => null);
         }
 
-        // ZMIANA: Używamy upsert zamiast create, aby zablokować błędy relacji (P2014)
-        // w przypadku, gdy ta weryfikacja już wcześniej miała jakąś recenzję.
         await prisma.verificationAttempt.update({
           where: { id: attemptId },
           data: {
@@ -696,14 +706,20 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
           },
         });
 
-        // ZMIANA: Lepsza obsługa DM z odpowiednią informacją zwrotną dla moderatora
         let dmStatus = "";
         try {
           const user = await interaction.client.users.fetch(attempt.userId);
           await user.send("🎉 Twoja weryfikacja została zaakceptowana! Masz już dostęp do pełnego serwera.");
         } catch (dmErr) {
-          console.warn(`[DM Error] Nie wysłano wiadomości do kandydata ${attempt.userId}: ${dmErr.message}`);
-          dmStatus = "\n*(Użytkownik ma zablokowane wiadomości prywatne i nie otrzymał powiadomienia)*";
+          dmStatus = "\n*(Użytkownik ma zablokowane wiadomości prywatne)*";
+        }
+
+        // ZMIANA 3 (Kolor): Edycja starego embeda i usunięcie przycisków
+        if (originalEmbed) {
+          originalEmbed.setColor(0x00ff00); // Zielony
+          originalEmbed.setTitle("✅ Weryfikacja Zaakceptowana");
+          originalEmbed.addFields({ name: "Rozpatrzył(a)", value: `<@${interaction.user.id}>`, inline: true });
+          await interaction.message.edit({ embeds: [originalEmbed], components: [] }).catch(() => null);
         }
 
         await logAction("verification_approved_manual", attempt.userId, interaction.user.id, { attemptId });
@@ -711,7 +727,6 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
 
       } else if (decision === "REJECTED") {
         
-        // ZMIANA: Używamy upsert
         await prisma.verificationAttempt.update({
           where: { id: attemptId },
           data: {
@@ -733,13 +748,20 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
           },
         });
 
-        // ZMIANA: Obsługa zablokowanego DM
         let dmStatus = "";
         try {
           const user = await interaction.client.users.fetch(attempt.userId);
           await user.send("❌ Twoja weryfikacja została odrzucona. Możesz spróbować ponownie za 24 godziny.");
         } catch (dmErr) {
-          dmStatus = "\n*(Nie udało się wysłać DM - użytkownik ma zablokowane wiadomości)*";
+          dmStatus = "\n*(Nie udało się wysłać DM - zablokowane wiadomości)*";
+        }
+
+        // ZMIANA 3 (Kolor): Edycja starego embeda na czerwony i usunięcie przycisków
+        if (originalEmbed) {
+          originalEmbed.setColor(0xff0000); // Czerwony
+          originalEmbed.setTitle("❌ Weryfikacja Odrzucona");
+          originalEmbed.addFields({ name: "Rozpatrzył(a)", value: `<@${interaction.user.id}>`, inline: true });
+          await interaction.message.edit({ embeds: [originalEmbed], components: [] }).catch(() => null);
         }
 
         await logAction("verification_rejected_manual", attempt.userId, interaction.user.id, { attemptId });
@@ -747,7 +769,6 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
 
       } else if (decision === "NEEDS_MORE_INFO") {
         
-        // ZMIANA: Używamy upsert
         await prisma.verificationAttempt.update({
           where: { id: attemptId },
           data: {
@@ -768,6 +789,14 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
             },
           },
         });
+
+        // ZMIANA 3 (Kolor): Edycja starego embeda na żółty (zostawiamy przyciski, by podjął decyzję później, lub usuwamy? Lepiej usunąć stare i np. zmusić do stworzenia nowego kanału lub użyć innego systemu, ale na ten moment usuwam przyciski)
+        if (originalEmbed) {
+          originalEmbed.setColor(0xffa500); // Żółty / Pomarańczowy
+          originalEmbed.setTitle("❓ Wymaga więcej informacji");
+          originalEmbed.addFields({ name: "Sprawdza", value: `<@${interaction.user.id}>`, inline: true });
+          await interaction.message.edit({ embeds: [originalEmbed], components: [] }).catch(() => null);
+        }
 
         await logAction("verification_needs_info", attempt.userId, interaction.user.id, { attemptId });
         return interaction.editReply({
