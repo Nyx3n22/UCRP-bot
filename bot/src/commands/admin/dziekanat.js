@@ -12,7 +12,7 @@ const { hasPermission } = require("../../config/roles");
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("dziekanat")
-    .setDescription("Narzędzia Dziekanatu")
+    .setDescription("🏛️ Narzędzia Dziekanatu")
     .addSubcommand((s) => s.setName("ogloszenie").setDescription("Otwiera kreator oficjalnego ogłoszenia")),
 
   async execute(interaction) {

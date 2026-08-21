@@ -20,7 +20,7 @@ const { hasPermission } = require("../../config/roles");
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("wiadomosc")
-    .setDescription("Wysyła wiadomość przez bota")
+    .setDescription("📢 Wysyła wiadomość przez bota")
     .addSubcommand((s) =>
       s
         .setName("tekst")

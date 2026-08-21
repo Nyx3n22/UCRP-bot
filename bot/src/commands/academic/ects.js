@@ -15,7 +15,7 @@ const DEFAULT_REQUIRED_PER_YEAR = 30;
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("ects")
-    .setDescription("Sprawdza zebraną pulę punktów ECTS")
+    .setDescription("🎓 Sprawdza zebraną pulę punktów ECTS")
     .addIntegerOption((o) => o.setName("wymagane").setDescription("Wymagana pula na rok (domyślnie 30)").setRequired(false)),
 
   async execute(interaction) {

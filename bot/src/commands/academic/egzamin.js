@@ -13,7 +13,7 @@ const { getBoundChannelId } = require("../../config/channels");
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("egzamin")
-    .setDescription("Zarządzanie egzaminami (kadra akademicka)")
+    .setDescription("📝 Zarządzanie egzaminami (kadra akademicka)")
     .addSubcommand((sub) =>
       sub
         .setName("start")

@@ -18,7 +18,7 @@ const { AiCreditService, CreditError } = require("../../services/aiCreditService
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("npc")
-    .setDescription("Rozmowa z postacią tła (NPC) grywaną przez AI")
+    .setDescription("🤖 Rozmowa z postacią tła (NPC) grywaną przez AI")
     .addSubcommand((s) =>
       s
         .setName("rozmawiaj")

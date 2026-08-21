@@ -15,7 +15,7 @@ const prisma = require("../../lib/prisma");
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("partnerstwo")
-    .setDescription("Partnerstwa i współprace")
+    .setDescription("🤝 Partnerstwa i współprace")
     .addSubcommand((s) => s.setName("zglos").setDescription("Zgłasza propozycję partnerstwa")),
 
   async execute(interaction) {

@@ -11,7 +11,7 @@ const prisma = require("../../lib/prisma");
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("moderacja")
-    .setDescription("Narzędzia administracyjne")
+    .setDescription("🛡️ Narzędzia administracyjne")
     .addSubcommand((s) =>
       s
         .setName("ban")

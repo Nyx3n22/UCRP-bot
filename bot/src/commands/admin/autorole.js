@@ -12,7 +12,7 @@ const { hasPermission } = require("../../config/roles");
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("autorole")
-    .setDescription("Zarządzanie panelami autoról")
+    .setDescription("🎭 Zarządzanie panelami autoról")
     .addSubcommand((s) =>
       s
         .setName("panel")

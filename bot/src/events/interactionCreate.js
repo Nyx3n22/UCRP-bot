@@ -7,6 +7,7 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
 const verificationServiceV2 = require("../services/verificationServiceV2");
 const applicationServiceV2 = require("../services/applicationServiceV2");
+const koloService = require("../services/koloService");
 const { getBoundChannelId } = require("../config/channels");
 const { hasPermission } = require("../config/roles");
 const { logError } = require("../utils/logger");
@@ -15,10 +16,51 @@ module.exports = {
   name: "interactionCreate",
   async execute(interaction) {
     try {
+      if (interaction.isAutocomplete()) {
+        const command = interaction.client.commands.get(interaction.commandName);
+        if (!command?.autocomplete) return;
+        return command.autocomplete(interaction);
+      }
+
       if (interaction.isChatInputCommand()) {
         const command = interaction.client.commands.get(interaction.commandName);
         if (!command) return;
         return command.execute(interaction);
+      }
+
+      // ========== KOŁA NAUKOWE ==========
+      if (interaction.isButton() && interaction.customId === "kolo_apply_start") {
+        return interaction.showModal(koloService.buildApplyModal());
+      }
+      if (interaction.isModalSubmit() && interaction.customId === "kolo_apply_modal") {
+        return koloService.handleApplyModalSubmit(interaction);
+      }
+      if (interaction.isUserSelectMenu() && interaction.customId === "kolo_pick_members") {
+        return koloService.handlePickMembersSubmit(interaction);
+      }
+      if (interaction.isButton() && interaction.customId.startsWith("kolo_invite_accept:")) {
+        return koloService.handleInviteResponse(interaction, interaction.customId.split(":")[1], true);
+      }
+      if (interaction.isButton() && interaction.customId.startsWith("kolo_invite_decline:")) {
+        return koloService.handleInviteResponse(interaction, interaction.customId.split(":")[1], false);
+      }
+      if (interaction.isButton() && interaction.customId.startsWith("kolo_app_approve:")) {
+        return koloService.handleApplicationReview(interaction, interaction.customId.split(":")[1], true);
+      }
+      if (interaction.isButton() && interaction.customId.startsWith("kolo_app_reject:")) {
+        return koloService.handleApplicationReview(interaction, interaction.customId.split(":")[1], false);
+      }
+      if (interaction.isButton() && interaction.customId.startsWith("kolo_change_approve:")) {
+        return koloService.handleChangeReview(interaction, interaction.customId.split(":")[1], true);
+      }
+      if (interaction.isButton() && interaction.customId.startsWith("kolo_change_reject:")) {
+        return koloService.handleChangeReview(interaction, interaction.customId.split(":")[1], false);
+      }
+      if (interaction.isButton() && interaction.customId.startsWith("kolo_research_approve:")) {
+        return koloService.handleResearchReview(interaction, interaction.customId.split(":")[1], true);
+      }
+      if (interaction.isButton() && interaction.customId.startsWith("kolo_research_reject:")) {
+        return koloService.handleResearchReview(interaction, interaction.customId.split(":")[1], false);
       }
 
       // ========== WERYFIKACJA V2 ==========

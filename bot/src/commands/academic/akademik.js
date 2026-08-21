@@ -5,7 +5,7 @@ const { hasPermission } = require("../../config/roles");
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("akademik")
-    .setDescription("Akademiki")
+    .setDescription("🏠 Akademiki")
     .addSubcommand((s) =>
       s
         .setName("zamieszkaj")

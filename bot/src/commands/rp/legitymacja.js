@@ -13,7 +13,7 @@ const prisma = require("../../lib/prisma");
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("legitymacja")
-    .setDescription("Generuje Twoją legitymację studencką"),
+    .setDescription("🪪 Generuje Twoją legitymację studencką"),
 
   async execute(interaction) {
     const character = await prisma.character.findUnique({
