@@ -601,15 +601,12 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
     await logAction("verification_auto_approved", userId, null, { genderIC, pesel });
   }
 
-  /**
+/**
    * Przygotowanie logiki dla obsługi przycisków recenzji (w interactionCreate)
    */
   async handleManualReviewDecision(interaction, attemptId, decision) {
-    // Ta funkcja robi mnóstwo operacji (kilka zapytań do bazy, pobranie roli,
-    // pobranie membera, dodanie roli, wysłanie DM) zanim cokolwiek odpowie
-    // Discordowi. Bez natychmiastowego deferReply token interakcji wygasa
-    // (limit 3s) zanim dotrzemy do jakiegokolwiek reply - stąd "Aplikacja nie
-    // odpowiedziała na czas". Od teraz wszystko poniżej używa editReply.
+    // Ta funkcja robi mnóstwo operacji zanim odpowie Discordowi.
+    // Używamy deferReply, aby token interakcji nie wygasł (limit 3s).
     try {
       await interaction.deferReply({ ephemeral: true });
     } catch (err) {
@@ -618,8 +615,7 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
     }
 
     try {
-      // Sprawdzenie uprawnień - bez tego każdy, kto widzi przyciski na kanale
-      // recenzji, mógłby zaakceptować/odrzucić cudzą weryfikację.
+      // Sprawdzenie uprawnień - zabezpiecza przed klikaniem przez zwykłych graczy
       const allowed = await hasPermission(interaction.member, "MODERATE");
       if (!allowed) {
         return interaction.editReply({
@@ -677,58 +673,97 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
           await member?.roles.add(verifiedRoleId).catch(() => null);
         }
 
+        // ZMIANA: Używamy upsert zamiast create, aby zablokować błędy relacji (P2014)
+        // w przypadku, gdy ta weryfikacja już wcześniej miała jakąś recenzję.
         await prisma.verificationAttempt.update({
           where: { id: attemptId },
           data: {
             status: "VERIFIED",
             manualReview: {
-              create: {
-                reviewerId: interaction.user.id,
-                decision: "APPROVED",
-                notes: "Zaakceptowana ręcznie przez moderatora",
+              upsert: {
+                create: {
+                  reviewerId: interaction.user.id,
+                  decision: "APPROVED",
+                  notes: "Zaakceptowana ręcznie przez moderatora",
+                },
+                update: {
+                  reviewerId: interaction.user.id,
+                  decision: "APPROVED",
+                  notes: "Zaakceptowana ręcznie przez moderatora",
+                }
               },
             },
           },
         });
 
-        // Wyślij wiadomość do kandydata
-        const user = await interaction.client.users.fetch(attempt.userId).catch(() => null);
-        await user?.send("🎉 Twoja weryfikacja została zaakceptowana! Masz już dostęp do pełnego serwera.").catch(() => null);
+        // ZMIANA: Lepsza obsługa DM z odpowiednią informacją zwrotną dla moderatora
+        let dmStatus = "";
+        try {
+          const user = await interaction.client.users.fetch(attempt.userId);
+          await user.send("🎉 Twoja weryfikacja została zaakceptowana! Masz już dostęp do pełnego serwera.");
+        } catch (dmErr) {
+          console.warn(`[DM Error] Nie wysłano wiadomości do kandydata ${attempt.userId}: ${dmErr.message}`);
+          dmStatus = "\n*(Użytkownik ma zablokowane wiadomości prywatne i nie otrzymał powiadomienia)*";
+        }
 
         await logAction("verification_approved_manual", attempt.userId, interaction.user.id, { attemptId });
-        return interaction.editReply({ content: "✅ Weryfikacja zaakceptowana." });
+        return interaction.editReply({ content: `✅ Weryfikacja zaakceptowana.${dmStatus}` });
+
       } else if (decision === "REJECTED") {
+        
+        // ZMIANA: Używamy upsert
         await prisma.verificationAttempt.update({
           where: { id: attemptId },
           data: {
             status: "REJECTED",
             manualReview: {
-              create: {
-                reviewerId: interaction.user.id,
-                decision: "REJECTED",
-                notes: "Odrzucona ręcznie przez moderatora",
+              upsert: {
+                create: {
+                  reviewerId: interaction.user.id,
+                  decision: "REJECTED",
+                  notes: "Odrzucona ręcznie przez moderatora",
+                },
+                update: {
+                  reviewerId: interaction.user.id,
+                  decision: "REJECTED",
+                  notes: "Odrzucona ręcznie przez moderatora",
+                }
               },
             },
           },
         });
 
-        const user = await interaction.client.users.fetch(attempt.userId).catch(() => null);
-        await user
-          ?.send("❌ Twoja weryfikacja została odrzucona. Możesz spróbować ponownie za 24 godziny.")
-          .catch(() => null);
+        // ZMIANA: Obsługa zablokowanego DM
+        let dmStatus = "";
+        try {
+          const user = await interaction.client.users.fetch(attempt.userId);
+          await user.send("❌ Twoja weryfikacja została odrzucona. Możesz spróbować ponownie za 24 godziny.");
+        } catch (dmErr) {
+          dmStatus = "\n*(Nie udało się wysłać DM - użytkownik ma zablokowane wiadomości)*";
+        }
 
         await logAction("verification_rejected_manual", attempt.userId, interaction.user.id, { attemptId });
-        return interaction.editReply({ content: "❌ Weryfikacja odrzucona." });
+        return interaction.editReply({ content: `❌ Weryfikacja odrzucona.${dmStatus}` });
+
       } else if (decision === "NEEDS_MORE_INFO") {
+        
+        // ZMIANA: Używamy upsert
         await prisma.verificationAttempt.update({
           where: { id: attemptId },
           data: {
             status: "PENDING_MANUAL_REVIEW", // powrót do kolejki
             manualReview: {
-              create: {
-                reviewerId: interaction.user.id,
-                decision: "NEEDS_MORE_INFO",
-                notes: "Wymaga dodatkowych informacji",
+              upsert: {
+                create: {
+                  reviewerId: interaction.user.id,
+                  decision: "NEEDS_MORE_INFO",
+                  notes: "Wymaga dodatkowych informacji",
+                },
+                update: {
+                  reviewerId: interaction.user.id,
+                  decision: "NEEDS_MORE_INFO",
+                  notes: "Wymaga dodatkowych informacji",
+                }
               },
             },
           },
@@ -736,7 +771,7 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
 
         await logAction("verification_needs_info", attempt.userId, interaction.user.id, { attemptId });
         return interaction.editReply({
-          content: "❓ Wysłano pytanie do kandydata. Czeka na odpowiedź.",
+          content: "❓ Oznaczono jako wymagające więcej informacji.",
         });
       }
     } catch (err) {
