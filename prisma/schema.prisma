@@ -75,6 +75,7 @@ model AiConfig {
   applicationAnalysisModel String @default("mistral-community/Mistral-7B-Instruct-v0.2") // model do analizy treści podań
   verificationAiEnabled Boolean @default(true) // czy AI ma analizować dane weryfikacji
   applicationAiEnabled Boolean @default(true)  // czy AI ma analizować podania
+  koloAiEnabled Boolean @default(true)         // czy AI ma analizować podania kół naukowych (rejestracja/badania/zmiany)
   updatedAt         DateTime @updatedAt
 }
 
@@ -314,21 +315,35 @@ model LibraryLoan {
   returnedAt  DateTime?
 }
 
-model ScientificCircle {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  leaderId  String
-  budgetIC  Int      @default(0)
-  members   ScientificCircleMember[]
+// AttendanceLog: automatyczne śledzenie czasu na kanałach głosowych ("sale
+// wykładowe"), używane przez attendanceService.js + voiceStateUpdate.js.
+// To coś innego niż AttendanceEntry (ręczne odznaczanie obecności przez
+// wykładowcę per przedmiot) - oba systemy współistnieją.
+model AttendanceLog {
+  id              String    @id @default(cuid())
+  userId          String
+  voiceChannelId  String
+  joinedAt        DateTime
+  leftAt          DateTime?
+  durationSec     Int?
+
+  @@index([userId, joinedAt])
 }
 
-model ScientificCircleMember {
-  id        String            @id @default(cuid())
-  circleId  String
-  circle    ScientificCircle  @relation(fields: [circleId], references: [id])
-  userId    String
+model DormitoryRoom {
+  id         String              @id @default(cuid())
+  roomNumber String              @unique
+  rentIC     Int                 @default(0)
+  residents  DormitoryResident[]
+}
 
-  @@unique([circleId, userId])
+model DormitoryResident {
+  id     String        @id @default(cuid())
+  roomId String
+  room   DormitoryRoom @relation(fields: [roomId], references: [id])
+  userId String        @unique
+
+  @@index([roomId])
 }
 
 model ThesisRegistration {
@@ -546,6 +561,145 @@ model ActionLog {
   createdAt DateTime @default(now())
   
   @@index([action, createdAt])
+}
+
+// ---------- KOŁA NAUKOWE ----------
+
+model Kolo {
+  id           String        @id @default(cuid())
+  name         String        @unique
+  description  String        @db.Text
+  logoUrl      String?
+  leaderId     String
+  status       KoloStatus    @default(PENDING_MEMBERS)
+  roleIdMember String?
+  roleIdLeader String?
+  roleIdVice   String?
+  belowMinSince DateTime?    // od kiedy koło jest poniżej wymaganego minimum (start licznika 72h)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  members    KoloMember[]
+  invites    KoloInvite[]
+  researches Research[]
+  changeRequests KoloChangeRequest[]
+
+  @@index([status])
+}
+
+enum KoloStatus {
+  PENDING_MEMBERS  // czeka aż min. 4 osoby (lider + 3) zaakceptują zaproszenie
+  PENDING_REVIEW   // wszyscy zaakceptowali, czeka na AI + admina
+  ACTIVE
+  REJECTED
+  DISSOLVED
+}
+
+model KoloMember {
+  id       String        @id @default(cuid())
+  koloId   String
+  kolo     Kolo          @relation(fields: [koloId], references: [id], onDelete: Cascade)
+  userId   String
+  role     KoloMemberRole @default(MEMBER)
+  joinedAt DateTime      @default(now())
+
+  @@unique([koloId, userId])
+  @@index([userId])
+}
+
+enum KoloMemberRole {
+  LEADER
+  VICE_LEADER
+  MEMBER
+}
+
+model KoloInvite {
+  id        String       @id @default(cuid())
+  koloId    String
+  kolo      Kolo         @relation(fields: [koloId], references: [id], onDelete: Cascade)
+  userId    String
+  status    InviteStatus @default(PENDING)
+  createdAt DateTime     @default(now())
+  expiresAt DateTime
+
+  @@unique([koloId, userId])
+  @@index([userId, status])
+}
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+}
+
+model KoloChangeRequest {
+  id          String              @id @default(cuid())
+  koloId      String
+  kolo        Kolo                @relation(fields: [koloId], references: [id], onDelete: Cascade)
+  requestedBy String
+  type        KoloChangeType
+  payload     Json                // np. { "newName": "..." } / { "newLogoUrl": "..." } / { "newLeaderId": "..." }
+  status      ChangeRequestStatus @default(PENDING_REVIEW)
+  aiScore     Float?
+  aiAnalysis  Json?
+  createdAt   DateTime            @default(now())
+}
+
+enum ChangeRequestStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+}
+
+enum KoloChangeType {
+  NAME
+  LOGO
+  LEADER
+}
+
+model ResearchTopic {
+  id        String   @id @default(cuid())
+  title     String   @unique
+  active    Boolean  @default(true) // admin może wyłączyć bez usuwania historii
+  createdAt DateTime @default(now())
+}
+
+model Research {
+  id           String         @id @default(cuid())
+  koloId       String
+  kolo         Kolo           @relation(fields: [koloId], references: [id], onDelete: Cascade)
+  topic        String         // z ResearchTopic.title LUB własny temat zaproponowany przez koło
+  isCustomTopic Boolean       @default(false)
+  status       ResearchStatus @default(PENDING_REVIEW)
+  aiScore      Float?
+  aiAnalysis   Json?
+  startedAt    DateTime?
+  pausedAt     DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime       @default(now())
+
+  members ResearchMember[]
+
+  @@index([koloId, status])
+}
+
+enum ResearchStatus {
+  PENDING_REVIEW // czeka na AI + admina (dot. własnego tematu)
+  ACTIVE
+  PAUSED
+  REJECTED
+  COMPLETED
+}
+
+model ResearchMember {
+  id         String   @id @default(cuid())
+  researchId String
+  research   Research @relation(fields: [researchId], references: [id], onDelete: Cascade)
+  userId     String
+  assignedAt DateTime @default(now())
+
+  @@unique([researchId, userId])
 }
 
 // ---------- DIAGNOSTYKA I BŁĘDY ----------
