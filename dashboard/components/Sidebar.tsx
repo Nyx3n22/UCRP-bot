@@ -15,6 +15,7 @@ const NAV_SECTIONS = [
     label: "Akademia",
     items: [
       { href: "/faculties", label: "Wydziały" },
+      { href: "/research-topics", label: "Tematy badań (Koła)" },
       { href: "/exams", label: "Egzaminy" },
       { href: "/syllabuses", label: "Sylabusy" },
       { href: "/library", label: "Biblioteka" },
