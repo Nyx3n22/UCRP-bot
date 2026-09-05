@@ -66,7 +66,7 @@ export default async function ChannelsPage() {
         {MULTI_CHANNEL_KEYS.map((key) => {
           const currentIds = (() => {
             try {
-              return JSON.parse(bindingByKey.get(key) ?? "[]") as string[];
+              return JSON.parse((bindingByKey.get(key) as string) ?? "[]") as string[];
             } catch {
               return [];
             }
