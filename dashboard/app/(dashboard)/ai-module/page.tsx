@@ -25,7 +25,7 @@ export default async function AiModulePage() {
       <div className="card p-4 mb-8 max-w-2xl text-sm">
         <p className="text-xs text-parchment/50 mb-1">Role z nielimitowanym AI (DONATE_UNLIMITED_AI):</p>
         {unlimitedBindings.length > 0 ? (
-          <p className="text-brass">{unlimitedBindings.map((b) => b.label).join(", ")}</p>
+          <p className="text-brass">{unlimitedBindings.map((b: { label: string }) => b.label).join(", ")}</p>
         ) : (
           <p className="text-burgundy">
             Żadna rola nie ma tego uprawnienia — donatorzy będą tracić kredyty jak zwykli użytkownicy. Dodaj to w
