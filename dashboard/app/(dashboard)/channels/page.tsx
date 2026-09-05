@@ -18,9 +18,9 @@ export default async function ChannelsPage() {
     fetchGuildChannels(),
   ]);
 
-  const bindingByKey = new Map(bindings.map((b) => [b.key, b.channelId]));
-  const textNameById = new Map(channels.text.map((c) => [c.id, c.name]));
-  const voiceNameById = new Map(channels.voice.map((c) => [c.id, c.name]));
+  const bindingByKey = new Map(bindings.map((b: any) => [b.key, b.channelId]));
+  const textNameById = new Map(channels.text.map((c: any) => [c.id, c.name]));
+  const voiceNameById = new Map(channels.voice.map((c: any) => [c.id, c.name]));
 
   return (
     <div>
