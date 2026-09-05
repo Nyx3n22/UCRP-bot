@@ -25,7 +25,7 @@ export default async function ExamsPage({ searchParams }: { searchParams: { subj
         <div>
           <h2 className="font-display text-lg mb-3">Przedmioty</h2>
           <div className="flex flex-col gap-1 mb-6">
-            {subjects.map((s) => (
+            {subjects.map((s: any) => (
               <Link
                 key={s.id}
                 href={`/exams?subjectId=${s.id}`}
@@ -50,7 +50,7 @@ export default async function ExamsPage({ searchParams }: { searchParams: { subj
               <input name="name" placeholder="Nazwa przedmiotu" required />
               <select name="facultyId" required>
                 <option value="">Wydział…</option>
-                {faculties.map((f) => (
+                {faculties.map((f: any) => (
                   <option key={f.id} value={f.id}>{f.name}</option>
                 ))}
               </select>
@@ -71,7 +71,7 @@ export default async function ExamsPage({ searchParams }: { searchParams: { subj
               </h2>
 
               <div className="flex flex-col gap-3 mb-6">
-                {selected.questions.map((q) => (
+                {selected.questions.map((q: any) => (
                   <div key={q.id} className="card p-4 flex justify-between items-start gap-4">
                     <div>
                       <p className="text-xs text-brass mb-1">#{q.order} — {q.topic}</p>
