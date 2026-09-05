@@ -16,6 +16,10 @@ const NAV_SECTIONS = [
     items: [
       { href: "/faculties", label: "Wydziały" },
       { href: "/research-topics", label: "Tematy badań (Koła)" },
+      { href: "/level-roles", label: "Nagrody za poziom" },
+      { href: "/moderation", label: "Moderacja" },
+      { href: "/send-message", label: "Wyślij wiadomość" },
+      { href: "/stypendia", label: "Stypendia" },
       { href: "/exams", label: "Egzaminy" },
       { href: "/syllabuses", label: "Sylabusy" },
       { href: "/library", label: "Biblioteka" },

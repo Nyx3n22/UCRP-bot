@@ -1,17 +1,18 @@
 import { prisma } from "@/lib/prisma";
-import { fetchGuildRoles } from "@/lib/discord";
-import { createGroup, addOption, deleteGroup } from "./actions";
+import { fetchGuildRoles, fetchGuildChannels } from "@/lib/discord";
+import { createGroup, addOption, deleteGroup, publishGroup } from "./actions";
 import OptionRow from "./OptionRow";
 
 const STYLES = ["PRIMARY", "SECONDARY", "SUCCESS", "DANGER"];
 
 export default async function ReactionRolesPage() {
-  const [groups, roles] = await Promise.all([
+  const [groups, roles, { text: channels }] = await Promise.all([
     prisma.reactionRoleGroup.findMany({
       include: { options: { orderBy: { order: "asc" } } },
       orderBy: { createdAt: "asc" },
     }),
     fetchGuildRoles(),
+    fetchGuildChannels(),
   ]);
 
   const roleNameById = new Map(roles.map((r) => [r.id, r.name]));
@@ -21,8 +22,8 @@ export default async function ReactionRolesPage() {
       <p className="label-eyebrow mb-2">Konfiguracja</p>
       <h1 className="font-display text-3xl mb-2">Autorole</h1>
       <p className="text-parchment/60 text-sm mb-8 max-w-2xl">
-        Zdefiniuj grupę, dodaj opcje (rola + etykieta przycisku), a następnie na Discordzie użyj{" "}
-        <code>/autorole panel [klucz_grupy]</code>, żeby opublikować panel na wybranym kanale.
+        Zdefiniuj grupę, dodaj opcje (rola + etykieta przycisku), a następnie wybierz kanał i kliknij „Opublikuj
+        panel" poniżej - bezpośrednio z Dashboardu, bez komend na Discordzie.
       </p>
 
       <details className="card p-4 mb-8 max-w-xl">
@@ -49,6 +50,19 @@ export default async function ReactionRolesPage() {
                 <button type="submit" className="btn-danger text-xs">Usuń grupę</button>
               </form>
             </div>
+
+            <form action={publishGroup} className="flex items-center gap-2 mb-4">
+              <input type="hidden" name="groupId" value={g.id} />
+              <select name="channelId" required className="text-sm">
+                <option value="">Wybierz kanał do publikacji...</option>
+                {channels.map((c) => (
+                  <option key={c.id} value={c.id}>#{c.name}</option>
+                ))}
+              </select>
+              <button type="submit" className="btn-primary text-xs">
+                📣 Opublikuj panel
+              </button>
+            </form>
 
             <table className="uwrp-table mb-4">
               <thead>

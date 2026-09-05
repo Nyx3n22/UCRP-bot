@@ -92,3 +92,51 @@ export async function sendChannelMessage(
   }
   return { ok: true };
 }
+
+/** Banuje użytkownika przez REST API (bot musi mieć uprawnienie Ban Members) */
+export async function banGuildMember(userId: string, reason: string): Promise<{ ok: boolean; error?: string }> {
+  const res = await fetch(`${DISCORD_API}/guilds/${process.env.GUILD_ID}/bans/${userId}`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}`,
+      "Content-Type": "application/json",
+      "X-Audit-Log-Reason": reason.slice(0, 500),
+    },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) return { ok: false, error: await res.text().catch(() => res.statusText) };
+  return { ok: true };
+}
+
+/** Wyrzuca użytkownika z serwera (nie to samo co ban - może dołączyć ponownie) */
+export async function kickGuildMember(userId: string, reason: string): Promise<{ ok: boolean; error?: string }> {
+  const res = await fetch(`${DISCORD_API}/guilds/${process.env.GUILD_ID}/members/${userId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}`,
+      "X-Audit-Log-Reason": reason.slice(0, 500),
+    },
+  });
+  if (!res.ok) return { ok: false, error: await res.text().catch(() => res.statusText) };
+  return { ok: true };
+}
+
+/** Wycisza użytkownika (Discord timeout) na dany czas w minutach */
+export async function timeoutGuildMember(
+  userId: string,
+  minutes: number,
+  reason: string
+): Promise<{ ok: boolean; error?: string }> {
+  const until = new Date(Date.now() + minutes * 60 * 1000).toISOString();
+  const res = await fetch(`${DISCORD_API}/guilds/${process.env.GUILD_ID}/members/${userId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}`,
+      "Content-Type": "application/json",
+      "X-Audit-Log-Reason": reason.slice(0, 500),
+    },
+    body: JSON.stringify({ communication_disabled_until: until }),
+  });
+  if (!res.ok) return { ok: false, error: await res.text().catch(() => res.statusText) };
+  return { ok: true };
+}

@@ -1,8 +1,11 @@
 import { prisma } from "@/lib/prisma";
-import { createResearchTopic, toggleResearchTopic, deleteResearchTopic } from "./actions";
+import { createResearchTopic, toggleResearchTopic, deleteResearchTopic, setServerInviteLink } from "./actions";
 
 export default async function ResearchTopicsPage() {
-  const topics = await prisma.researchTopic.findMany({ orderBy: { createdAt: "desc" } });
+  const [topics, generalConfig] = await Promise.all([
+    prisma.researchTopic.findMany({ orderBy: { createdAt: "desc" } }),
+    prisma.generalConfig.findUnique({ where: { id: "singleton" } }),
+  ]);
 
   return (
     <div>
@@ -12,6 +15,23 @@ export default async function ResearchTopicsPage() {
         Koła mogą od razu rozpocząć badanie na temat z tej listy (bez akceptacji). Zgłoszenie własnego, spoza listy
         tematu zawsze trafia do oceny AI i administracji. Wyłączenie tematu (zamiast usunięcia) zachowuje historię
         wcześniej prowadzonych badań na ten temat.
+      </p>
+
+      <form action={setServerInviteLink} className="card p-4 flex items-center gap-3 mb-8 max-w-xl">
+        <input
+          type="text"
+          name="serverInviteLink"
+          placeholder="Link zaproszenia na DRUGI serwer Kół Naukowych (np. discord.gg/xxxxx)"
+          defaultValue={generalConfig?.serverInviteLink ?? ""}
+          className="flex-1"
+        />
+        <button type="submit" className="btn-primary text-xs">
+          Zapisz link
+        </button>
+      </form>
+      <p className="text-parchment/40 text-xs mb-8 max-w-2xl -mt-6">
+        Wysyłany zaproszonym członkom koła w wiadomości z prośbą o potwierdzenie dostępu - Koła Naukowe (kategorie,
+        kanały, role) żyją na osobnym serwerze Discord niż reszta bota, więc każdy członek musi tam dołączyć.
       </p>
 
       <form action={createResearchTopic} className="card p-4 flex items-center gap-3 mb-8 max-w-xl">
