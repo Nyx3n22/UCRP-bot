@@ -8,6 +8,8 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("
 const verificationServiceV2 = require("../services/verificationServiceV2");
 const applicationServiceV2 = require("../services/applicationServiceV2");
 const koloService = require("../services/koloService");
+const partnerstwoService = require("../services/partnerstwoService");
+const ticketService = require("../services/ticketService");
 const { getBoundChannelId } = require("../config/channels");
 const { hasPermission } = require("../config/roles");
 const { logError } = require("../utils/logger");
@@ -51,16 +53,47 @@ module.exports = {
         return koloService.handleApplicationReview(interaction, interaction.customId.split(":")[1], false);
       }
       if (interaction.isButton() && interaction.customId.startsWith("kolo_change_approve:")) {
-        return koloService.handleChangeReview(interaction, interaction.customId.split(":")[1], true);
+        return koloService.handleChangeReviewDispatch(interaction, interaction.customId.split(":")[1], true);
       }
       if (interaction.isButton() && interaction.customId.startsWith("kolo_change_reject:")) {
-        return koloService.handleChangeReview(interaction, interaction.customId.split(":")[1], false);
+        return koloService.handleChangeReviewDispatch(interaction, interaction.customId.split(":")[1], false);
       }
       if (interaction.isButton() && interaction.customId.startsWith("kolo_research_approve:")) {
         return koloService.handleResearchReview(interaction, interaction.customId.split(":")[1], true);
       }
       if (interaction.isButton() && interaction.customId.startsWith("kolo_research_reject:")) {
         return koloService.handleResearchReview(interaction, interaction.customId.split(":")[1], false);
+      }
+      if (interaction.isButton() && interaction.customId.startsWith("kolo_consent:")) {
+        const [, koloId, userId] = interaction.customId.split(":");
+        return koloService.handleConsentButton(interaction, koloId, userId);
+      }
+      // kanał ⚒️zarządzaj-kołem: menu wyboru akcji
+      if (interaction.isStringSelectMenu() && interaction.customId === "kolo_manage_select") {
+        return koloService.handleManageSelect(interaction);
+      }
+      // wybór osoby (zaproś/wyrzuć/zmień lidera/przydziel do badania)
+      if (interaction.isUserSelectMenu() && interaction.customId.startsWith("kolo_manage_target:")) {
+        const [, action, koloId] = interaction.customId.split(":");
+        return koloService.handleManageTargetSelect(interaction, action, koloId);
+      }
+      // modale tekstowe (nazwa/logo/nowa rola/temat badania)
+      if (interaction.isModalSubmit() && interaction.customId.startsWith("kolo_modal_rename:")) {
+        return koloService.handleRenameModalSubmit(interaction, interaction.customId.split(":")[1]);
+      }
+      if (interaction.isModalSubmit() && interaction.customId.startsWith("kolo_modal_relogo:")) {
+        return koloService.handleRelogoModalSubmit(interaction, interaction.customId.split(":")[1]);
+      }
+      if (interaction.isModalSubmit() && interaction.customId.startsWith("kolo_modal_newrole:")) {
+        return koloService.handleNewRoleModalSubmit(interaction, interaction.customId.split(":")[1]);
+      }
+      if (interaction.isModalSubmit() && interaction.customId.startsWith("kolo_modal_startresearch:")) {
+        return koloService.handleStartResearchModalSubmit(interaction, interaction.customId.split(":")[1]);
+      }
+      // wybór konkretnego badania (zatrzymaj/wznów/przydziel - ostatni krok)
+      if (interaction.isStringSelectMenu() && interaction.customId.startsWith("kolo_research_pick:")) {
+        const [, action, koloId, extra] = interaction.customId.split(":");
+        return koloService.handleResearchPickSelect(interaction, action, koloId, extra);
       }
 
       // ========== WERYFIKACJA V2 ==========
@@ -119,6 +152,14 @@ module.exports = {
       }
 
       // ========== APLIKACJE V2 Z AI ==========
+      if (interaction.isButton() && interaction.customId.startsWith("application_start:")) {
+        const type = interaction.customId.split(":")[1];
+        return interaction.showModal(applicationServiceV2.buildApplicationModal(type));
+      }
+      if (interaction.isModalSubmit() && interaction.customId.startsWith("application_modal:")) {
+        const type = interaction.customId.split(":")[1];
+        return applicationServiceV2.handleApplicationModalSubmit(interaction, type);
+      }
       if (interaction.isButton() && (interaction.customId.startsWith("application_accept:") || interaction.customId.startsWith("application_reject:"))) {
         if (!(await hasPermission(interaction.member, "REVIEW_APPLICATIONS"))) {
           return interaction.reply({
@@ -195,21 +236,15 @@ module.exports = {
         return;
       }
 
-      if (interaction.isModalSubmit() && interaction.customId.startsWith("wiadomosc_tekst_modal:")) {
-        const channelId = interaction.customId.split(":")[1];
-        const wiadomoscCommand = interaction.client.commands.get("wiadomosc");
-        return wiadomoscCommand.handleTextModalSubmit(interaction, channelId);
+      if (interaction.isButton() && interaction.customId.startsWith("ticket_open:")) {
+        const categoryKey = interaction.customId.split(":")[1];
+        return ticketService.handleOpenButton(interaction, categoryKey);
       }
-
-      if (interaction.isModalSubmit() && interaction.customId.startsWith("wiadomosc_embed_modal:")) {
-        const channelId = interaction.customId.split(":")[1];
-        const wiadomoscCommand = interaction.client.commands.get("wiadomosc");
-        return wiadomoscCommand.handleEmbedModalSubmit(interaction, channelId);
+      if (interaction.isButton() && interaction.customId === "partnerstwo_start") {
+        return interaction.showModal(partnerstwoService.buildModal());
       }
-
       if (interaction.isModalSubmit() && interaction.customId === "partnerstwo_modal") {
-        const partnerstwoCommand = interaction.client.commands.get("partnerstwo");
-        return partnerstwoCommand.handleModalSubmit(interaction);
+        return partnerstwoService.handleModalSubmit(interaction);
       }
 
       if (interaction.isModalSubmit() && interaction.customId === "usos_grade_modal") {

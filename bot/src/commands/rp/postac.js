@@ -11,7 +11,7 @@ const prisma = require("../../lib/prisma");
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("postac")
-    .setDescription("👤 Wyświetla kartę postaci IC")
+    .setDescription("👤 | Wyświetla kartę postaci IC")
     .addUserOption((opt) =>
       opt.setName("uzytkownik").setDescription("Czyją postać sprawdzić").setRequired(false)
     ),

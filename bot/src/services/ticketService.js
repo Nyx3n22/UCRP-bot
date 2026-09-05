@@ -4,11 +4,64 @@
  * po stronie Dashboardu — tu operujemy na categoryKey przekazanym z komendy/przycisku).
  */
 
-const { ChannelType, PermissionFlagsBits, AttachmentBuilder } = require("discord.js");
+const { ChannelType, PermissionFlagsBits, AttachmentBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
 const prisma = require("../lib/prisma");
 const { getBoundChannelId } = require("../config/channels");
+const { generateBanner } = require("../utils/banner");
+
+const CATEGORY_LABELS = {
+  SUPPORT: { label: "Pomoc techniczna", emoji: "🛠️" },
+  REPORT: { label: "Zgłoszenie administracyjne", emoji: "🚩" },
+  DEANERY: { label: "Sprawa dziekanatu", emoji: "🏛️" },
+};
 
 class TicketService {
+  buildPanelEmbed() {
+    return new EmbedBuilder()
+      .setTitle("🎫 Centrum pomocy")
+      .setDescription("Wybierz kategorię swojej sprawy, aby otworzyć prywatny ticket z odpowiednim zespołem.")
+      .setColor(0x1a2a6c).setTimestamp();
+  }
+
+  buildPanelRow() {
+    return new ActionRowBuilder().addComponents(
+      Object.entries(CATEGORY_LABELS).map(([key, { label, emoji }]) =>
+        new ButtonBuilder().setCustomId(`ticket_open:${key}`).setLabel(label).setEmoji(emoji).setStyle(ButtonStyle.Primary)
+      )
+    );
+  }
+
+  async ensurePanelPosted(client) {
+    try {
+      const channelId = await getBoundChannelId("TICKET_PANEL");
+      if (!channelId) return;
+      const channel = await client.channels.fetch(channelId).catch(() => null);
+      if (!channel) return;
+
+      const recent = await channel.messages.fetch({ limit: 25 }).catch(() => null);
+      const already = recent?.find(
+        (m) => m.author.id === client.user.id && m.components?.[0]?.components?.[0]?.customId?.startsWith("ticket_open:")
+      );
+      if (already) return;
+
+      const banner = new AttachmentBuilder(generateBanner("Centrum Pomocy"), { name: "banner.png" });
+      await channel.send({
+        embeds: [this.buildPanelEmbed().setImage("attachment://banner.png")],
+        components: [this.buildPanelRow()],
+        files: [banner],
+      });
+    } catch (err) {
+      console.error("[ticketService] Błąd publikacji panelu:", err.message);
+    }
+  }
+
+  async handleOpenButton(interaction, categoryKey) {
+    await interaction.deferReply({ ephemeral: true });
+    const categoryChannelId = await getBoundChannelId(`TICKET_CATEGORY_${categoryKey}`);
+    const { channel } = await this.openTicket(interaction.guild, interaction.member, categoryKey, categoryChannelId);
+    return interaction.editReply(`✅ Ticket utworzony: <#${channel.id}>`);
+  }
+
   async openTicket(guild, member, categoryKey, categoryChannelId) {
     const channel = await guild.channels.create({
       name: `ticket-${member.user.username}`.toLowerCase().slice(0, 90),

@@ -4,7 +4,7 @@ const attendanceService = require("../../services/attendanceService");
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("frekwencja")
-    .setDescription("📊 Sprawdza Twoją frekwencję na salach wykładowych")
+    .setDescription("📊 | Sprawdza Twoją frekwencję na salach wykładowych")
     .addIntegerOption((o) => o.setName("dni").setDescription("Zakres w dniach (domyślnie 30)").setRequired(false)),
 
   async execute(interaction) {

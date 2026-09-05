@@ -8,8 +8,19 @@
 const prisma = require("../lib/prisma");
 const { getRoleIdForPermission, PERMISSION_KEYS } = require("../config/roles");
 const { generateAiReply } = require("./aiGatewayService");
+const { getBoundChannelId } = require("../config/channels");
 const { logError, logAction } = require("../utils/logger");
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
+const {
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  AttachmentBuilder,
+} = require("discord.js");
+const { generateBanner } = require("../utils/banner");
 
 const ROLE_ON_ACCEPT = {
   STUDENT: PERMISSION_KEYS.STUDENT_ROLE,
@@ -144,7 +155,7 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "sentiment": "p
       );
 
     if (aiFlags.length > 0) {
-      embed.addField("🚩 Flagi AI", aiFlags.join(", "));
+      embed.addFields({ name: "🚩 Flagi AI", value: aiFlags.join(", ") });
     }
 
     const acceptBtn = new ButtonBuilder()
@@ -160,6 +171,123 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "sentiment": "p
     const row = new ActionRowBuilder().addComponents(acceptBtn, rejectBtn);
 
     await channel.send({ embeds: [embed], components: [row] });
+  }
+
+  // ==================== PANEL / ZGŁASZANIE (dawniej /aplikuj - nigdy nie istniało) ====================
+
+  buildPanelEmbed(type) {
+    const labels = {
+      STUDENT: { title: "🎓 Podanie na studenta", desc: "Chcesz dołączyć jako student? Kliknij przycisk, aby złożyć podanie." },
+      WYKLADOWCA: { title: "📋 Podanie na wykładowcę", desc: "Chcesz dołączyć do kadry akademickiej? Kliknij przycisk, aby złożyć podanie." },
+      ADMINISTRACJA: { title: "🛡️ Podanie do administracji", desc: "Chcesz dołączyć do administracji serwera? Kliknij przycisk, aby złożyć podanie." },
+    }[type];
+    return new EmbedBuilder().setTitle(labels.title).setDescription(labels.desc).setColor(0x1a2a6c).setTimestamp();
+  }
+
+  buildPanelRow(type) {
+    return new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`application_start:${type}`).setLabel("📝 Złóż podanie").setStyle(ButtonStyle.Primary)
+    );
+  }
+
+  async ensurePanelsPosted(client) {
+    for (const [type, channelKey] of Object.entries({
+      STUDENT: "APPLICATIONS_STUDENT",
+      WYKLADOWCA: "APPLICATIONS_WYKLADOWCA",
+      ADMINISTRACJA: "APPLICATIONS_ADMINISTRACJA",
+    })) {
+      try {
+        const channelId = await getBoundChannelId(channelKey);
+        if (!channelId) continue;
+        const channel = await client.channels.fetch(channelId).catch(() => null);
+        if (!channel) continue;
+
+        const recent = await channel.messages.fetch({ limit: 25 }).catch(() => null);
+        const already = recent?.find(
+          (m) => m.author.id === client.user.id && m.components?.[0]?.components?.[0]?.customId === `application_start:${type}`
+        );
+        if (already) continue;
+
+        const bannerTitles = { STUDENT: "Podanie na studenta", WYKLADOWCA: "Podanie na wykładowcę", ADMINISTRACJA: "Podanie do administracji" };
+        const banner = new AttachmentBuilder(generateBanner(bannerTitles[type]), { name: "banner.png" });
+        await channel.send({
+          embeds: [this.buildPanelEmbed(type).setImage("attachment://banner.png")],
+          components: [this.buildPanelRow(type)],
+          files: [banner],
+        });
+      } catch (err) {
+        await logError("applicationServiceV2", "PANEL_POST_ERROR", err.message, { type, stack: err.stack });
+      }
+    }
+  }
+
+  _questionsFor(type) {
+    return {
+      STUDENT: [
+        { id: "motywacja", label: "Dlaczego chcesz do nas dołączyć?", style: TextInputStyle.Paragraph },
+        { id: "wydzial", label: "Wybrany wydział", style: TextInputStyle.Short },
+        { id: "doswiadczenie", label: "Doświadczenie w RP (opcjonalnie)", style: TextInputStyle.Paragraph, required: false },
+      ],
+      WYKLADOWCA: [
+        { id: "motywacja", label: "Dlaczego chcesz uczyć na uczelni?", style: TextInputStyle.Paragraph },
+        { id: "przedmiot", label: "Jaki przedmiot chcesz prowadzić?", style: TextInputStyle.Short },
+        { id: "doswiadczenie", label: "Doświadczenie akademickie/RP", style: TextInputStyle.Paragraph },
+      ],
+      ADMINISTRACJA: [
+        { id: "motywacja", label: "Dlaczego chcesz dołączyć do administracji?", style: TextInputStyle.Paragraph },
+        { id: "dostepnosc", label: "Dostępność czasowa (godziny/dni)", style: TextInputStyle.Short },
+        { id: "doswiadczenie", label: "Doświadczenie w moderacji", style: TextInputStyle.Paragraph },
+      ],
+    }[type];
+  }
+
+  buildApplicationModal(type) {
+    const modal = new ModalBuilder().setCustomId(`application_modal:${type}`).setTitle("Formularz podania");
+    for (const q of this._questionsFor(type)) {
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId(q.id)
+            .setLabel(q.label.slice(0, 45))
+            .setStyle(q.style)
+            .setRequired(q.required !== false)
+            .setMaxLength(q.style === TextInputStyle.Paragraph ? 1000 : 200)
+        )
+      );
+    }
+    return modal;
+  }
+
+  async handleApplicationModalSubmit(interaction, type) {
+    await interaction.deferReply({ ephemeral: true });
+    try {
+      const existing = await prisma.application.findFirst({ where: { userId: interaction.user.id, type, status: "PENDING" } });
+      if (existing) {
+        return interaction.editReply("❌ Masz już aktywne podanie tego typu w trakcie rozpatrywania.");
+      }
+
+      const answers = {};
+      for (const q of this._questionsFor(type)) {
+        answers[q.id] = interaction.fields.getTextInputValue(q.id) || null;
+      }
+
+      const application = await prisma.application.create({ data: { userId: interaction.user.id, type, answers } });
+
+      const ai = await this.analyzeApplicationWithAi({ answers });
+      await prisma.application.update({
+        where: { id: application.id },
+        data: { aiAnalysis: ai.analysis, aiScore: ai.score, aiFlags: ai.flags, aiAnalyzedAt: new Date() },
+      });
+
+      const reviewChannelId = (await getBoundChannelId("APPLICATIONS_REVIEW")) || (await getBoundChannelId("LOG_MOD"));
+      const reviewChannel = reviewChannelId ? await interaction.guild.channels.fetch(reviewChannelId).catch(() => null) : null;
+      await this.sendToReviewChannel(interaction.guild, application, ai.score, ai.flags, reviewChannel);
+
+      return interaction.editReply("✅ Podanie wysłane! Otrzymasz wiadomość, gdy zostanie rozpatrzone.");
+    } catch (err) {
+      await logError("applicationServiceV2", "MODAL_SUBMIT_ERROR", err.message, { userId: interaction.user.id, type, stack: err.stack });
+      return interaction.editReply("❌ Błąd serwera. Spróbuj ponownie.").catch(() => null);
+    }
   }
 }
 

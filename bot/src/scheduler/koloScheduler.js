@@ -11,7 +11,12 @@
 
 const prisma = require("../lib/prisma");
 const { logError, logAction } = require("../utils/logger");
+const { getKolaGuild } = require("../config/kolaGuild");
 const koloService = require("../services/koloService");
+const applicationServiceV2 = require("../services/applicationServiceV2");
+const partnerstwoService = require("../services/partnerstwoService");
+const ticketService = require("../services/ticketService");
+const verificationServiceV2 = require("../services/verificationServiceV2");
 
 const CHECK_INTERVAL_MS = 15 * 60 * 1000;
 const GRACE_PERIOD_MS = 72 * 60 * 60 * 1000;
@@ -31,7 +36,7 @@ async function checkExpiredInvites(client) {
     await leader
       ?.send(
         `⌛ Zaproszenie do koła **${invite.kolo.name}** dla <@${invite.userId}> wygasło (72h bez odpowiedzi). ` +
-          "Użyj `/kolo zaprosz`, aby zaprosić kogoś innego."
+          "Zaproś kogoś innego przez kanał ⚒️zarządzaj-kołem (jeśli koło już aktywne) - jeśli koło jeszcze nie zostało zatwierdzone, skontaktuj się z supportem."
       )
       .catch(() => null);
   }
@@ -45,15 +50,9 @@ async function checkBelowMinimumDissolutions(client) {
 
   for (const kolo of stuck) {
     try {
-      const guild = client.guilds.cache.first();
-
-      for (const roleId of [kolo.roleIdMember, kolo.roleIdLeader, kolo.roleIdVice]) {
-        if (!roleId) continue;
-        const role = await guild?.roles.fetch(roleId).catch(() => null);
-        await role?.delete("Koło Naukowe auto-rozwiązane - poniżej minimum osób przez >72h").catch(() => null);
-      }
-
-      await prisma.kolo.update({ where: { id: kolo.id }, data: { status: "DISSOLVED" } });
+      const guild = getKolaGuild(client);
+      if (!guild) continue;
+      await koloService._teardownKolo(guild, kolo);
 
       for (const m of kolo.members) {
         const user = await client.users.fetch(m.userId).catch(() => null);
@@ -73,6 +72,10 @@ function startKoloScheduler(client) {
   const tick = async () => {
     try {
       await koloService.ensurePanelPosted(client);
+      await applicationServiceV2.ensurePanelsPosted(client);
+      await partnerstwoService.ensurePanelPosted(client);
+      await ticketService.ensurePanelPosted(client);
+      await verificationServiceV2.ensurePanelPosted(client);
       await checkExpiredInvites(client);
       await checkBelowMinimumDissolutions(client);
     } catch (err) {

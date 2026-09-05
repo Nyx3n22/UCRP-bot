@@ -5,7 +5,7 @@ const { hasPermission } = require("../../config/roles");
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("warunek")
-    .setDescription("⚠️ Zaliczenia warunkowe")
+    .setDescription("⚠️ | Zaliczenia warunkowe")
     .addSubcommand((s) =>
       s
         .setName("zglos")

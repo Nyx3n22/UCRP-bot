@@ -1,52 +1,24 @@
 /**
  * commands/admin/ticket.js
- * /ticket otworz [kategoria] — dostępne dla wszystkich (RP: podania, pomoc)
  * /ticket przypisz — kadra/administracja przypisuje się do ticketu
  * /ticket zamknij — zamyka ticket i generuje transkrypcję HTML
+ * Otwieranie ticketów NIE jest już komendą - patrz ticketService.js
+ * (panel z przyciskami per kategoria na kanale TICKET_PANEL).
  */
 
 const { SlashCommandBuilder } = require("discord.js");
 const ticketService = require("../../services/ticketService");
-const { getBoundChannelId } = require("../../config/channels");
 const { hasPermission } = require("../../config/roles");
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("ticket")
-    .setDescription("🎫 Zarządzanie ticketami")
-    .addSubcommand((s) =>
-      s
-        .setName("otworz")
-        .setDescription("Otwiera nowy ticket")
-        .addStringOption((o) =>
-          o
-            .setName("kategoria")
-            .setDescription("Rodzaj sprawy")
-            .setRequired(true)
-            .addChoices(
-              { name: "Pomoc techniczna", value: "SUPPORT" },
-              { name: "Zgłoszenie administracyjne", value: "REPORT" },
-              { name: "Sprawa dziekanatu", value: "DEANERY" }
-            )
-        )
-    )
+    .setDescription("🎫 | Zarządzanie ticketami")
     .addSubcommand((s) => s.setName("przypisz").setDescription("Przypisuje Cię do bieżącego ticketu"))
     .addSubcommand((s) => s.setName("zamknij").setDescription("Zamyka bieżący ticket i tworzy transkrypcję")),
 
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
-
-    if (sub === "otworz") {
-      const categoryKey = interaction.options.getString("kategoria");
-      const categoryChannelId = await getBoundChannelId(`TICKET_CATEGORY_${categoryKey}`);
-      const { channel } = await ticketService.openTicket(
-        interaction.guild,
-        interaction.member,
-        categoryKey,
-        categoryChannelId
-      );
-      return interaction.reply({ content: `✅ Ticket utworzony: <#${channel.id}>`, ephemeral: true });
-    }
 
     if (sub === "przypisz") {
       if (!(await hasPermission(interaction.member, "MODERATE"))) {

@@ -4,7 +4,7 @@ const libraryService = require("../../services/libraryService");
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("biblioteka")
-    .setDescription("📚 Biblioteka Akademicka")
+    .setDescription("📚 | Biblioteka Akademicka")
     .addSubcommand((s) =>
       s
         .setName("wypozycz")

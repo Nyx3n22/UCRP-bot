@@ -10,7 +10,7 @@ const prisma = require("../../lib/prisma");
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("sylabus")
-    .setDescription("📖 Wyświetla podstawę programową przedmiotu")
+    .setDescription("📖 | Wyświetla podstawę programową przedmiotu")
     .addStringOption((o) => o.setName("przedmiot").setDescription("Nazwa przedmiotu").setRequired(true)),
 
   async execute(interaction) {

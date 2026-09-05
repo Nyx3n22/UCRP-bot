@@ -10,6 +10,10 @@ const { startSocialMediaScheduler } = require("./scheduler/socialMediaScheduler"
 const { startKoloScheduler } = require("./scheduler/koloScheduler");
 const { startHealthServer } = require("./healthServer");
 const koloService = require("./services/koloService");
+const applicationServiceV2 = require("./services/applicationServiceV2");
+const partnerstwoService = require("./services/partnerstwoService");
+const ticketService = require("./services/ticketService");
+const verificationServiceV2 = require("./services/verificationServiceV2");
 
 const client = new Client({
   intents: [
@@ -81,5 +85,9 @@ async function registerSlashCommands(commandData) {
   await registerSlashCommands(commandData);
   startSocialMediaScheduler(client);
   await koloService.ensurePanelPosted(client);
+  await applicationServiceV2.ensurePanelsPosted(client);
+  await partnerstwoService.ensurePanelPosted(client);
+  await ticketService.ensurePanelPosted(client);
+  await verificationServiceV2.ensurePanelPosted(client);
   startKoloScheduler(client);
 })();

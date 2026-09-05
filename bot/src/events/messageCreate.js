@@ -7,6 +7,7 @@
 const prisma = require("../lib/prisma");
 const { AiCreditService, CreditError } = require("../services/aiCreditService");
 const { runAutomodCheck, generateAiReply } = require("../services/aiGatewayService");
+const levelService = require("../services/levelService");
 
 module.exports = {
   name: "messageCreate",
@@ -14,10 +15,9 @@ module.exports = {
     if (message.author.bot || !message.guild) return;
 
     const config = await prisma.aiConfig.findUnique({ where: { id: "singleton" } });
-    if (!config) return;
 
     // --- Automod (działa na wszystkich kanałach, niezależnie od bramki AI) ---
-    if (config.automodEnabled) {
+    if (config?.automodEnabled) {
       const verdict = await runAutomodCheck(message.content).catch(() => null);
       if (verdict?.violation) {
         await message.delete().catch(() => null);
@@ -32,6 +32,11 @@ module.exports = {
         return;
       }
     }
+
+    // --- XP (/level) — niezależne od konfiguracji AI, na każdym kanale ---
+    await levelService.onMessage(message).catch(() => null);
+
+    if (!config) return;
 
     // --- Bramka AI ---
     if (!config.allowedChannelIds.includes(message.channel.id)) return;

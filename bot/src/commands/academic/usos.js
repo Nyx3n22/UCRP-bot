@@ -41,7 +41,7 @@ async function resolveTier(member) {
 }
 
 module.exports = {
-  data: new SlashCommandBuilder().setName("usos").setDescription("🖥️ Otwiera panel USOS dopasowany do Twojej roli"),
+  data: new SlashCommandBuilder().setName("usos").setDescription("🖥️ | Otwiera panel USOS dopasowany do Twojej roli"),
 
   async execute(interaction) {
     // Neon (darmowy plan) usypia bazę przy bezczynności - jej "obudzenie" bywa

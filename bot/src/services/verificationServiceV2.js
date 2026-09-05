@@ -13,14 +13,17 @@
  * Błędy logowane do ErrorLog.
  */
 
-const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require("discord.js");
+const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, AttachmentBuilder } = require("discord.js");
 const prisma = require("../lib/prisma");
 const { generatePesel } = require("./peselGenerator");
 const { generateCaptcha } = require("../utils/captcha");
 const robloxClient = require("./robloxClient");
 const { getRoleIdForPermission, hasPermission } = require("../config/roles");
+const { getBoundChannelId } = require("../config/channels");
 const { generateAiReply } = require("./aiGatewayService");
 const { logError, logAction } = require("../utils/logger");
+const { computeInitialValidUntil } = require("../utils/legitymacja");
+const { generateBanner } = require("../utils/banner");
 
 const CODE_CHARSET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -33,6 +36,46 @@ function randomCode(length = 8) {
 }
 
 class VerificationServiceV2 {
+  buildPanelEmbed() {
+    return new EmbedBuilder()
+      .setTitle("🎓 Weryfikacja IC")
+      .setDescription("Aby uzyskać dostęp do serwera, kliknij przycisk poniżej i wypełnij formularz weryfikacyjny.")
+      .setColor(0x1a2a6c).setTimestamp();
+  }
+
+  buildPanelRow() {
+    return new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("start_verification").setLabel("🎓 Rozpocznij weryfikację").setStyle(ButtonStyle.Primary)
+    );
+  }
+
+  /** Wysyła (lub odświeża) panel na kanale VERIFICATION. Bez tego przycisk
+   * start_verification nie miałby skąd zostać kliknięty, gdyby ktoś usunął
+   * wiadomość wklejoną ręcznie przy pierwszej konfiguracji serwera. */
+  async ensurePanelPosted(client) {
+    try {
+      const channelId = await getBoundChannelId("VERIFICATION");
+      if (!channelId) return;
+      const channel = await client.channels.fetch(channelId).catch(() => null);
+      if (!channel) return;
+
+      const recent = await channel.messages.fetch({ limit: 25 }).catch(() => null);
+      const already = recent?.find(
+        (m) => m.author.id === client.user.id && m.components?.[0]?.components?.[0]?.customId === "start_verification"
+      );
+      if (already) return;
+
+      const banner = new AttachmentBuilder(generateBanner("Weryfikacja IC"), { name: "banner.png" });
+      await channel.send({
+        embeds: [this.buildPanelEmbed().setImage("attachment://banner.png")],
+        components: [this.buildPanelRow()],
+        files: [banner],
+      });
+    } catch (err) {
+      await logError("verificationService", "PANEL_POST_ERROR", err.message, { stack: err.stack });
+    }
+  }
+
   constructor() {
     this._pendingVerifications = new Map(); // discordUserId -> stan weryfikacji
   }
@@ -587,6 +630,7 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
         birthDateIC: pending.birthDate,
         genderIC,
         pesel,
+        legitValidUntil: computeInitialValidUntil(),
       },
     });
 
@@ -601,19 +645,25 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
     await logAction("verification_auto_approved", userId, null, { genderIC, pesel });
   }
 
-/**
+  /**
    * Przygotowanie logiki dla obsługi przycisków recenzji (w interactionCreate)
    */
   async handleManualReviewDecision(interaction, attemptId, decision) {
+    // Ta funkcja robi mnóstwo operacji (kilka zapytań do bazy, pobranie roli,
+    // pobranie membera, dodanie roli, wysłanie DM) zanim cokolwiek odpowie
+    // Discordowi. Bez natychmiastowego deferReply token interakcji wygasa
+    // (limit 3s) zanim dotrzemy do jakiegokolwiek reply - stąd "Aplikacja nie
+    // odpowiedziała na czas". Od teraz wszystko poniżej używa editReply.
     try {
-      // ZMIANA 1: Użycie flags: 64 zamiast ephemeral: true pozbywa się ostrzeżenia (warningu) z konsoli
-      await interaction.deferReply({ flags: 64 });
+      await interaction.deferReply({ ephemeral: true });
     } catch (err) {
       await logError("verificationService", "DEFER_FAILED", err.message, { userId: interaction.user.id, stack: err.stack }).catch(() => null);
       return;
     }
 
     try {
+      // Sprawdzenie uprawnień - bez tego każdy, kto widzi przyciski na kanale
+      // recenzji, mógłby zaakceptować/odrzucić cudzą weryfikację.
       const allowed = await hasPermission(interaction.member, "MODERATE");
       if (!allowed) {
         return interaction.editReply({
@@ -635,11 +685,6 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
         });
       }
 
-      // ZMIANA 3 (Przygotowanie): Pobieramy stary embed z wiadomości, aby go edytować
-      const originalEmbed = interaction.message.embeds[0] 
-        ? EmbedBuilder.from(interaction.message.embeds[0]) 
-        : null;
-
       if (decision === "APPROVED") {
         const genderIC = this._inferGenderFromName(attempt.firstNameIC);
         const pesel = generatePesel(attempt.birthDateIC, genderIC);
@@ -659,23 +704,15 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
           },
         });
 
-        // ZMIANA 2: Używamy upsert zamiast create, co naprawia błąd Unique constraint failed (userId)
-        await prisma.character.upsert({
-          where: { userId: attempt.userId },
-          update: {
-            firstNameIC: attempt.firstNameIC,
-            lastNameIC: attempt.lastNameIC,
-            birthDateIC: attempt.birthDateIC,
-            genderIC: attempt.genderIC,
-            pesel,
-          },
-          create: {
+        await prisma.character.create({
+          data: {
             userId: attempt.userId,
             firstNameIC: attempt.firstNameIC,
             lastNameIC: attempt.lastNameIC,
             birthDateIC: attempt.birthDateIC,
             genderIC: attempt.genderIC,
             pesel,
+            legitValidUntil: computeInitialValidUntil(),
           },
         });
 
@@ -690,117 +727,61 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
           data: {
             status: "VERIFIED",
             manualReview: {
-              upsert: {
-                create: {
-                  reviewerId: interaction.user.id,
-                  decision: "APPROVED",
-                  notes: "Zaakceptowana ręcznie przez moderatora",
-                },
-                update: {
-                  reviewerId: interaction.user.id,
-                  decision: "APPROVED",
-                  notes: "Zaakceptowana ręcznie przez moderatora",
-                }
+              create: {
+                reviewerId: interaction.user.id,
+                decision: "APPROVED",
+                notes: "Zaakceptowana ręcznie przez moderatora",
               },
             },
           },
         });
 
-        let dmStatus = "";
-        try {
-          const user = await interaction.client.users.fetch(attempt.userId);
-          await user.send("🎉 Twoja weryfikacja została zaakceptowana! Masz już dostęp do pełnego serwera.");
-        } catch (dmErr) {
-          dmStatus = "\n*(Użytkownik ma zablokowane wiadomości prywatne)*";
-        }
-
-        // ZMIANA 3 (Kolor): Edycja starego embeda i usunięcie przycisków
-        if (originalEmbed) {
-          originalEmbed.setColor(0x00ff00); // Zielony
-          originalEmbed.setTitle("✅ Weryfikacja Zaakceptowana");
-          originalEmbed.addFields({ name: "Rozpatrzył(a)", value: `<@${interaction.user.id}>`, inline: true });
-          await interaction.message.edit({ embeds: [originalEmbed], components: [] }).catch(() => null);
-        }
+        // Wyślij wiadomość do kandydata
+        const user = await interaction.client.users.fetch(attempt.userId).catch(() => null);
+        await user?.send("🎉 Twoja weryfikacja została zaakceptowana! Masz już dostęp do pełnego serwera.").catch(() => null);
 
         await logAction("verification_approved_manual", attempt.userId, interaction.user.id, { attemptId });
-        return interaction.editReply({ content: `✅ Weryfikacja zaakceptowana.${dmStatus}` });
-
+        return interaction.editReply({ content: "✅ Weryfikacja zaakceptowana." });
       } else if (decision === "REJECTED") {
-        
         await prisma.verificationAttempt.update({
           where: { id: attemptId },
           data: {
             status: "REJECTED",
             manualReview: {
-              upsert: {
-                create: {
-                  reviewerId: interaction.user.id,
-                  decision: "REJECTED",
-                  notes: "Odrzucona ręcznie przez moderatora",
-                },
-                update: {
-                  reviewerId: interaction.user.id,
-                  decision: "REJECTED",
-                  notes: "Odrzucona ręcznie przez moderatora",
-                }
+              create: {
+                reviewerId: interaction.user.id,
+                decision: "REJECTED",
+                notes: "Odrzucona ręcznie przez moderatora",
               },
             },
           },
         });
 
-        let dmStatus = "";
-        try {
-          const user = await interaction.client.users.fetch(attempt.userId);
-          await user.send("❌ Twoja weryfikacja została odrzucona. Możesz spróbować ponownie za 24 godziny.");
-        } catch (dmErr) {
-          dmStatus = "\n*(Nie udało się wysłać DM - zablokowane wiadomości)*";
-        }
-
-        // ZMIANA 3 (Kolor): Edycja starego embeda na czerwony i usunięcie przycisków
-        if (originalEmbed) {
-          originalEmbed.setColor(0xff0000); // Czerwony
-          originalEmbed.setTitle("❌ Weryfikacja Odrzucona");
-          originalEmbed.addFields({ name: "Rozpatrzył(a)", value: `<@${interaction.user.id}>`, inline: true });
-          await interaction.message.edit({ embeds: [originalEmbed], components: [] }).catch(() => null);
-        }
+        const user = await interaction.client.users.fetch(attempt.userId).catch(() => null);
+        await user
+          ?.send("❌ Twoja weryfikacja została odrzucona. Możesz spróbować ponownie za 24 godziny.")
+          .catch(() => null);
 
         await logAction("verification_rejected_manual", attempt.userId, interaction.user.id, { attemptId });
-        return interaction.editReply({ content: `❌ Weryfikacja odrzucona.${dmStatus}` });
-
+        return interaction.editReply({ content: "❌ Weryfikacja odrzucona." });
       } else if (decision === "NEEDS_MORE_INFO") {
-        
         await prisma.verificationAttempt.update({
           where: { id: attemptId },
           data: {
             status: "PENDING_MANUAL_REVIEW", // powrót do kolejki
             manualReview: {
-              upsert: {
-                create: {
-                  reviewerId: interaction.user.id,
-                  decision: "NEEDS_MORE_INFO",
-                  notes: "Wymaga dodatkowych informacji",
-                },
-                update: {
-                  reviewerId: interaction.user.id,
-                  decision: "NEEDS_MORE_INFO",
-                  notes: "Wymaga dodatkowych informacji",
-                }
+              create: {
+                reviewerId: interaction.user.id,
+                decision: "NEEDS_MORE_INFO",
+                notes: "Wymaga dodatkowych informacji",
               },
             },
           },
         });
 
-        // ZMIANA 3 (Kolor): Edycja starego embeda na żółty (zostawiamy przyciski, by podjął decyzję później, lub usuwamy? Lepiej usunąć stare i np. zmusić do stworzenia nowego kanału lub użyć innego systemu, ale na ten moment usuwam przyciski)
-        if (originalEmbed) {
-          originalEmbed.setColor(0xffa500); // Żółty / Pomarańczowy
-          originalEmbed.setTitle("❓ Wymaga więcej informacji");
-          originalEmbed.addFields({ name: "Sprawdza", value: `<@${interaction.user.id}>`, inline: true });
-          await interaction.message.edit({ embeds: [originalEmbed], components: [] }).catch(() => null);
-        }
-
         await logAction("verification_needs_info", attempt.userId, interaction.user.id, { attemptId });
         return interaction.editReply({
-          content: "❓ Oznaczono jako wymagające więcej informacji.",
+          content: "❓ Wysłano pytanie do kandydata. Czeka na odpowiedź.",
         });
       }
     } catch (err) {
