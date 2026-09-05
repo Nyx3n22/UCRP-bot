@@ -46,7 +46,7 @@ export default async function CharactersPage({ searchParams }: { searchParams: {
           </tr>
         </thead>
         <tbody>
-          {characters.map((c) => (
+          {characters.map((c: any) => (
             <tr key={c.id}>
               <td>{c.firstNameIC} {c.lastNameIC}</td>
               <td className="font-mono text-xs">{c.userId}</td>
