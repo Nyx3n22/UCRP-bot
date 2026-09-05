@@ -23,7 +23,7 @@ export default async function ModerationPage() {
       </p>
 
       <div className="grid md:grid-cols-2 gap-6">
-        <form action={banUser} className="card p-5 flex flex-col gap-3">
+        <form action={async (formData) => { await banUser(formData); }} className="card p-5 flex flex-col gap-3">
           <h2 className="font-display text-lg">🔨 Ban</h2>
           <input type="text" name="userId" placeholder="ID / wzmianka użytkownika" required />
           <input type="text" name="reason" placeholder="Powód" required />
