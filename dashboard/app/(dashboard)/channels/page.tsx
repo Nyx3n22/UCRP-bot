@@ -110,7 +110,7 @@ export default async function ChannelsPage() {
           <tr><th>Klucz</th><th>Wartość</th><th></th></tr>
         </thead>
         <tbody>
-          {bindings.map((b) => (
+          {bindings.map((b: any) => (
             <tr key={b.key}>
               <td className="font-mono text-brass">{b.key}</td>
               <td className="font-mono text-xs break-all">{b.channelId}</td>
