@@ -19,7 +19,7 @@ export default async function ApplicationsPage() {
       </p>
 
       <div className="flex flex-col gap-3">
-        {applications.map((a) => (
+        {applications.map((a: any) => (
           <details key={a.id} className="card p-4">
             <summary className="cursor-pointer flex justify-between items-center">
               <span>
