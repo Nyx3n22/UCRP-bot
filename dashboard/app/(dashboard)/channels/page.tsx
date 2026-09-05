@@ -49,7 +49,7 @@ export default async function ChannelsPage() {
             </div>
             <input type="hidden" name="key" value={key} />
             <div className="flex items-center gap-2">
-              <select name="channelId" defaultValue={bindingByKey.get(key) ?? ""} className="w-56">
+              <select name="channelId" defaultValue={(bindingByKey.get(key) as string) ?? ""} className="w-56">
                 <option value="">— wybierz kanał —</option>
                 {channels.text.map((c) => (
                   <option key={c.id} value={c.id}>#{c.name}</option>
