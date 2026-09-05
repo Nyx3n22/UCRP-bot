@@ -43,7 +43,7 @@ export default async function ChannelsPage() {
           <form key={key} action={upsertChannelBinding} className="card p-4 flex items-center gap-3 justify-between">
             <div>
               <p className="font-mono text-xs text-brass">{key}</p>
-              {bindingByKey.get(key) && (
+              {!!bindingByKey.get(key) && (
                 <p className="text-xs text-parchment/40">obecnie: #{textNameById.get(bindingByKey.get(key)!) ?? bindingByKey.get(key)}</p>
               )}
             </div>
