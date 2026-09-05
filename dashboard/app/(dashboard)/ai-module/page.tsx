@@ -108,7 +108,7 @@ export default async function AiModulePage() {
           </tr>
         </thead>
         <tbody>
-          {tiers.map((t) => (
+          {tiers.map((t: any) => (
             <tr key={t.id}>
               <td>
                 <form id={`tier-${t.id}`} action={upsertPricingTier}>
