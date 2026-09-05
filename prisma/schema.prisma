@@ -60,6 +60,11 @@ model ChannelBinding {
 
 // ---------- MODUŁ AI ----------
 
+model GeneralConfig {
+  id               String  @id @default("singleton")
+  serverInviteLink String? // link zapraszający na serwer, wysyłany np. w wiadomości zgody na dołączenie do koła
+}
+
 model AiConfig {
   id                String   @id @default("singleton")
   provider          String   @default("huggingface") // WYŁĄCZNIE Hugging Face
@@ -176,6 +181,7 @@ model Character {
   faculty          Faculty?    @relation(fields: [facultyId], references: [id])
   scientificTitle  String?     // sync z RoleBinding tytułów naukowych
   albumNumber      String      @unique @default(cuid())
+  legitValidUntil  DateTime?   // ważność legitymacji - ustawiana przy utworzeniu postaci, przedłużana przez dziekanat
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
 }
@@ -330,20 +336,20 @@ model AttendanceLog {
   @@index([userId, joinedAt])
 }
 
-model DormitoryRoom {
-  id         String              @id @default(cuid())
-  roomNumber String              @unique
-  rentIC     Int                 @default(0)
-  residents  DormitoryResident[]
+model UserLevel {
+  id            String    @id @default(cuid())
+  userId        String    @unique
+  xp            Int       @default(0)
+  level         Int       @default(0)
+  lastMessageAt DateTime? // cooldown XP z wiadomości (60s)
+  voiceJoinedAt DateTime? // kiedy dołączył do kanału głosowego (do naliczenia XP przy wyjściu)
+  updatedAt     DateTime  @updatedAt
 }
 
-model DormitoryResident {
-  id     String        @id @default(cuid())
-  roomId String
-  room   DormitoryRoom @relation(fields: [roomId], references: [id])
-  userId String        @unique
-
-  @@index([roomId])
+model LevelRoleReward {
+  id     String @id @default(cuid())
+  level  Int    @unique
+  roleId String
 }
 
 model ThesisRegistration {
@@ -570,21 +576,47 @@ model Kolo {
   name         String        @unique
   description  String        @db.Text
   logoUrl      String?
+  colorHex     String        @default("#FFFFFF") // dominujący kolor loga (wykryty automatycznie) lub biały domyślnie
   leaderId     String
   status       KoloStatus    @default(PENDING_MEMBERS)
-  roleIdMember String?
-  roleIdLeader String?
-  roleIdVice   String?
+
+  categoryId          String? // kategoria kanałów na serwerze
+  channelAnnouncements String?
+  channelChat          String?
+  channelResearch      String?
+  channelManage        String?
+  channelDocuments     String? // kanał forum
+  channelVoice         String?
+
+  roleIdDivider String? // "przedziałka" •══════• Nazwa •══════• - wizualny separator, mają go wszyscy członkowie
+  roleIdLeader  String? // • Lider Koła Naukowego •
+  roleIdVice    String? // • Wicelider Koła Naukowego •
+  roleIdMember  String? // • Członek Koła Naukowego •
+
   belowMinSince DateTime?    // od kiedy koło jest poniżej wymaganego minimum (start licznika 72h)
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
-  members    KoloMember[]
-  invites    KoloInvite[]
-  researches Research[]
+  members      KoloMember[]
+  invites      KoloInvite[]
+  researches   Research[]
   changeRequests KoloChangeRequest[]
+  customRoles  KoloCustomRole[]
 
   @@index([status])
+}
+
+// Dodatkowe role poza domyślnymi 3 (Lider/Wicelider/Członek), zaakceptowane
+// przez admina. Format nazwy wymuszony w kodzie: "• Nazwa •".
+model KoloCustomRole {
+  id        String   @id @default(cuid())
+  koloId    String
+  kolo      Kolo     @relation(fields: [koloId], references: [id], onDelete: Cascade)
+  name      String
+  roleId    String
+  createdAt DateTime @default(now())
+
+  @@unique([koloId, name])
 }
 
 enum KoloStatus {
@@ -596,12 +628,14 @@ enum KoloStatus {
 }
 
 model KoloMember {
-  id       String        @id @default(cuid())
-  koloId   String
-  kolo     Kolo          @relation(fields: [koloId], references: [id], onDelete: Cascade)
-  userId   String
-  role     KoloMemberRole @default(MEMBER)
-  joinedAt DateTime      @default(now())
+  id            String        @id @default(cuid())
+  koloId        String
+  kolo          Kolo          @relation(fields: [koloId], references: [id], onDelete: Cascade)
+  userId        String
+  role          KoloMemberRole @default(MEMBER)
+  currentRoleId String?       // ID roli Discord aktualnie nadanej (jedna "treściowa" rola naraz, oprócz przedziałki)
+  consentGiven  Boolean       @default(false) // czy kliknął przycisk zgody po zatwierdzeniu koła (przed nadaniem ról)
+  joinedAt      DateTime      @default(now())
 
   @@unique([koloId, userId])
   @@index([userId])
@@ -656,6 +690,8 @@ enum KoloChangeType {
   NAME
   LOGO
   LEADER
+  NEW_ROLE
+  DISSOLVE
 }
 
 model ResearchTopic {
