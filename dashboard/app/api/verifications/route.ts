@@ -18,13 +18,18 @@ export async function GET(req: NextRequest) {
     const hasPerm = await hasPermission(session.user.discordId, 'MODERATE');
     if (!hasPerm) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-    const statusParam = req.nextUrl.searchParams.get('status') || 'all';
-    const isValidStatus = (Object.values(VerificationStatus) as string[]).includes(statusParam);
+    // Frontend wysyła małe litery (?status=pending) - mapujemy na enumy.
+    // 'pending' to kolejka do ręcznej recenzji (to ona jest "do zrobienia").
+    const statusParam = (req.nextUrl.searchParams.get('status') || 'all').toLowerCase();
+    const STATUS_MAP: Record<string, VerificationStatus | null> = {
+      all: null,
+      pending: VerificationStatus.PENDING_MANUAL_REVIEW,
+      verified: VerificationStatus.VERIFIED,
+      rejected: VerificationStatus.REJECTED,
+    };
+    const mapped = STATUS_MAP[statusParam];
 
-    const where: Prisma.VerificationAttemptWhereInput =
-      statusParam === 'all' || !isValidStatus
-        ? {}
-        : { status: statusParam as VerificationStatus };
+    const where: Prisma.VerificationAttemptWhereInput = mapped ? { status: mapped } : {};
     
     const verifications = await prisma.verificationAttempt.findMany({
       where,

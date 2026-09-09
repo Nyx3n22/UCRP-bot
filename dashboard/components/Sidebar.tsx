@@ -30,6 +30,8 @@ const NAV_SECTIONS = [
     label: "Dane",
     items: [
       { href: "/applications", label: "Podania" },
+      { href: "/applications-review", label: "Przegląd podań" },
+      { href: "/verifications", label: "Weryfikacje" },
       { href: "/characters", label: "Baza postaci" },
       { href: "/logs", label: "Logi" },
     ],

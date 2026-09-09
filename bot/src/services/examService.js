@@ -20,9 +20,17 @@ class ExamService {
   /**
    * @param client Discord.Client
    * @param options { subjectName, topic, facultyChannelId, resultsChannelId, startedById, guild }
+   * @param onStarted opcjonalny callback ({ session, studentCount }) wołany
+   *   NATYCHMIAST po utworzeniu sesji - zanim bot zacznie czekać na
+   *   odpowiedzi studentów (co może trwać godzinami i przekroczyć limit
+   *   tokenu interakcji Discorda).
    */
-  async startExam(client, options) {
+  async startExam(client, options, onStarted = null) {
     const { subjectName, topic, facultyChannelId, resultsChannelId, startedById, guild } = options;
+
+    if (!resultsChannelId) {
+      throw new Error("Kanał wyników egzaminów nie jest skonfigurowany (klucz EXAM_RESULTS w Dashboardzie).");
+    }
 
     const subject = await prisma.subject.findFirst({
       where: { name: subjectName },
@@ -53,6 +61,9 @@ class ExamService {
     if (students.length === 0) {
       throw new Error("Brak studentów przypisanych do tego wydziału.");
     }
+
+    // Potwierdzenie startu zanim zaczniemy długie oczekiwanie na DM-y.
+    if (onStarted) await onStarted({ session, studentCount: students.length });
 
     // Odpalamy DM-y równolegle, ale każdy student ma niezależny "wątek" odpowiedzi
     const results = await Promise.allSettled(
@@ -155,7 +166,15 @@ class ExamService {
     const buffer = Buffer.from(lines.join("\n"), "utf-8");
     const file = new AttachmentBuilder(buffer, { name: `wyniki_${subject.name}.txt` });
 
-    const channel = await client.channels.fetch(session.resultsChannelId);
+    if (!session?.resultsChannelId) {
+      await logError("examService", "NO_RESULTS_CHANNEL", "Sesja egzaminacyjna nie ma resultsChannelId - pomijam publikację wyników", { sessionId: session?.id });
+      return;
+    }
+    const channel = await client.channels.fetch(session.resultsChannelId).catch(() => null);
+    if (!channel || typeof channel.isTextBased !== "function" || !channel.isTextBased()) {
+      await logError("examService", "RESULTS_CHANNEL_INVALID", "Kanał wyników egzaminu nie istnieje lub nie jest tekstowy", { channelId: session.resultsChannelId });
+      return;
+    }
     await channel.send({
       content: `📊 Egzamin z **${subject.name}** zakończony. Wzięło udział: ${
         summary.filter((s) => s.ok).length

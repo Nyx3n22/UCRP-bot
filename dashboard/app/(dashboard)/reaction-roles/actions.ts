@@ -43,6 +43,7 @@ export async function publishGroup(formData: FormData) {
   }
 
   const result = await sendChannelMessage(channelId, { embeds: [embed], components });
+  if (!result.ok) console.error("[reaction-roles] publishGroup failed:", result.error);
   revalidatePath("/reaction-roles");
   return result;
 }
@@ -53,7 +54,13 @@ export async function createGroup(formData: FormData) {
   const description = String(formData.get("description") ?? "").trim();
   if (!key || !title) return;
 
-  await prisma.reactionRoleGroup.create({ data: { key, title, description: description || null } });
+  // Upsert zamiast create: key jest @unique i ponowne zapisanie tej samej
+  // grupy crashowało cały formularz błędem P2002.
+  await prisma.reactionRoleGroup.upsert({
+    where: { key },
+    update: { title, description: description || null },
+    create: { key, title, description: description || null },
+  });
   revalidatePath("/reaction-roles");
 }
 
@@ -63,7 +70,8 @@ export async function addOption(formData: FormData) {
   const label = String(formData.get("label") ?? "").trim();
   const emoji = String(formData.get("emoji") ?? "").trim();
   const style = String(formData.get("style") ?? "SECONDARY");
-  const order = Number(formData.get("order") ?? 0);
+  const orderRaw = Number(formData.get("order") ?? 0);
+  const order = Number.isFinite(orderRaw) ? Math.floor(orderRaw) : 0;
   if (!groupId || discordRoleIds.length === 0 || !label) return;
 
   await prisma.reactionRoleOption.create({
@@ -78,7 +86,8 @@ export async function updateOption(formData: FormData) {
   const label = String(formData.get("label") ?? "").trim();
   const emoji = String(formData.get("emoji") ?? "").trim();
   const style = String(formData.get("style") ?? "SECONDARY");
-  const order = Number(formData.get("order") ?? 0);
+  const orderRaw = Number(formData.get("order") ?? 0);
+  const order = Number.isFinite(orderRaw) ? Math.floor(orderRaw) : 0;
   if (!id || discordRoleIds.length === 0 || !label) return;
 
   await prisma.reactionRoleOption.update({

@@ -189,9 +189,20 @@ class KoloService {
         return interaction.editReply({ content: "❌ Sesja wygasła, zacznij od nowa klikając przycisk na panelu.", components: [] });
       }
 
-      const invitedIds = interaction.values.filter((id) => id !== interaction.user.id);
+      const pickedIds = interaction.values.filter((id) => id !== interaction.user.id);
+      // Osoby już w innym kole nie mogą przyjąć zaproszenia (reguła jednego
+      // koła) - odfiltruj je OD RAZU, inaczej zgłoszenie utknie w
+      // PENDING_MEMBERS z zaproszeniami, których nikt nie może przyjąć.
+      const busyMembers = await prisma.koloMember.findMany({ where: { userId: { in: pickedIds } }, select: { userId: true } });
+      const busySet = new Set(busyMembers.map((m) => m.userId));
+      const invitedIds = pickedIds.filter((id) => !busySet.has(id));
       if (invitedIds.length < MIN_INVITED) {
-        return interaction.editReply({ content: `❌ Musisz wybrać min. ${MIN_INVITED} innych osób (nie licząc siebie).`, components: [] });
+        return interaction.editReply({
+          content:
+            `❌ Musisz wybrać min. ${MIN_INVITED} innych osób (nie licząc siebie), które nie należą do żadnego koła. ` +
+            (busySet.size > 0 ? `Pominięto ${busySet.size} os. już należących do innych kół - wybierz ponownie.` : ""),
+          components: [],
+        });
       }
 
       const kolo = await prisma.kolo.create({
@@ -217,7 +228,8 @@ class KoloService {
       return interaction.editReply({
         content:
           `✅ Zgłoszenie koła **${kolo.name}** utworzone. Wysłano zaproszenia do ${invitedIds.length} osób ` +
-          `(masz 72h, zanim wygasną). Gdy wszyscy zaakceptują, zgłoszenie trafi do oceny AI i administracji.`,
+          `(masz 72h, zanim wygasną). Gdy wszyscy zaakceptują, zgłoszenie trafi do oceny AI i administracji.` +
+          (busySet.size > 0 ? `\n⚠️ Pominięto ${busySet.size} os. już należących do innych kół.` : ""),
         components: [],
       });
     } catch (err) {
@@ -260,10 +272,22 @@ class KoloService {
         await leader
           ?.send(
             `❌ **${interaction.user.tag}** odrzucił(a) zaproszenie do koła **${invite.kolo.name}**. ` +
-              `Użyj \`/kolo zaproś\`, aby zaprosić kogoś innego.`
+              `Użyj \`/kolo zaprosz\`, aby zaprosić kogoś innego.`
           )
           .catch(() => null);
         return interaction.editReply({ content: "Odrzucono zaproszenie.", embeds: [], components: [] });
+      }
+
+      // Ktoś mógł dołączyć do innego koła już PO otrzymaniu tego
+      // zaproszenia - członkostwo w dwóch kołach naraz jest zabronione.
+      const memberElsewhere = await prisma.koloMember.findFirst({ where: { userId: interaction.user.id } });
+      if (memberElsewhere && memberElsewhere.koloId !== invite.koloId) {
+        await prisma.koloInvite.update({ where: { id: inviteId }, data: { status: "DECLINED" } });
+        return interaction.editReply({
+          content: "❌ Należysz już do innego koła naukowego - nie możesz przyjąć tego zaproszenia.",
+          embeds: [],
+          components: [],
+        });
       }
 
       await prisma.koloInvite.update({ where: { id: inviteId }, data: { status: "ACCEPTED" } });
@@ -273,9 +297,39 @@ class KoloService {
         create: { koloId: invite.koloId, userId: interaction.user.id, role: "MEMBER" },
       });
 
-      const stillPending = await prisma.koloInvite.count({ where: { koloId: invite.koloId, status: "PENDING" } });
-      if (stillPending === 0 && invite.kolo.status === "PENDING_MEMBERS") {
-        await this._advanceToReview(interaction.client, invite.koloId);
+      // Zaproszenie do JUŻ AKTYWNEGO koła (z kanału zarządzania): nowy
+      // członek musi jeszcze potwierdzić dostęp DM-em, inaczej nigdy nie
+      // dostałby ról na serwerze Kół (stary błąd: accept kończył się
+      // tylko wpisem w bazie).
+      if (invite.kolo.status === "ACTIVE") {
+        await this._sendConsentDm(interaction.client, invite.koloId, interaction.user.id, invite.kolo.name);
+        await this._checkMinimumMembers(interaction.client, invite.koloId);
+        return interaction.editReply({
+          content: `✅ Przyjęto zaproszenie do koła **${invite.kolo.name}**. Sprawdź DM z prośbą o potwierdzenie dostępu do kanałów.`,
+          embeds: [],
+          components: [],
+        });
+      }
+
+      const [stillPending, acceptedCount] = await Promise.all([
+        prisma.koloInvite.count({ where: { koloId: invite.koloId, status: "PENDING" } }),
+        prisma.koloInvite.count({ where: { koloId: invite.koloId, status: "ACCEPTED" } }),
+      ]);
+      if (invite.kolo.status === "PENDING_MEMBERS") {
+        if (stillPending === 0 && acceptedCount >= MIN_INVITED) {
+          await this._advanceToReview(interaction.client, invite.koloId);
+        } else if (stillPending === 0) {
+          // Wszyscy odpowiedzieli, ale za mało zaakceptowało (reszta
+          // odrzuciła) - lider musi doprosić brakujące osoby, inaczej
+          // zgłoszenie utknęłoby tu na zawsze.
+          const leader = await interaction.client.users.fetch(invite.kolo.leaderId).catch(() => null);
+          await leader
+            ?.send(
+              `⚠️ W kole **${invite.kolo.name}** zaakceptowało tylko ${acceptedCount} z wymaganych min. ${MIN_INVITED} osób. ` +
+                `Zaproś brakujące osoby komendą \`/kolo zaprosz\`, żeby zgłoszenie mogło trafić do oceny.`
+            )
+            .catch(() => null);
+        }
       }
 
       return interaction.editReply({ content: `✅ Dołączono do koła **${invite.kolo.name}**.`, embeds: [], components: [] });
@@ -284,32 +338,6 @@ class KoloService {
       return interaction.editReply({ content: "❌ Błąd serwera.", components: [] }).catch(() => null);
     }
   }
-
-  // ==================== OCENA AI + ADMIN ====================
-
-  async _aiScore(kind, details) {
-    const aiConfig = await prisma.aiConfig.findUnique({ where: { id: "singleton" } });
-    if (!aiConfig || !aiConfig.koloAiEnabled) return { score: 1.0, flags: [], analysis: null };
-
-    const prompt = `Oceń poniższe zgłoszenie dotyczące koła naukowego na serwerze RP (uniwersytet). Typ: ${kind}.\n\n${details}\n\nOdpowiedź WYŁĄCZNIE w JSON: {"score": 0.0-1.0, "flags": ["lista_problemow"], "reasoning": "krótkie uzasadnienie"}`;
-
-    try {
-      const response = await generateAiReply(prompt, aiConfig, {
-        isPremium: false,
-        systemPrompt: "Jesteś moderatorem oceniającym zgłoszenia kół naukowych na serwerze RP. Odpowiadaj wyłącznie w formacie JSON.",
-      });
-      const parsed = JSON.parse(response);
-      return {
-        score: Math.max(0, Math.min(1, parsed.score ?? 0.5)),
-        flags: parsed.flags || [],
-        analysis: parsed.reasoning || "",
-      };
-    } catch (err) {
-      console.error("[koloService] AI analysis error:", err.message);
-      return { score: 0.8, flags: ["ai_parse_error"], analysis: null };
-    }
-  }
-
 
   // ==================== OCENA AI + ADMIN (aplikacja koła) ====================
 
@@ -389,7 +417,15 @@ class KoloService {
       }
 
       if (!approve) {
-        await prisma.kolo.update({ where: { id: koloId }, data: { status: "REJECTED" } });
+        // Nazwa jest @unique - odrzucone koło musi ją zwolnić, inaczej nikt
+        // nigdy nie założy koła o tej nazwie. Członków też usuwamy, inaczej
+        // reguła "jedno koło" blokowałaby ich na zawsze (nie mogliby ani
+        // założyć nowego, ani dołączyć do innego).
+        await prisma.$transaction([
+          prisma.kolo.update({ where: { id: koloId }, data: { status: "REJECTED", name: `${kolo.name}#odrzucone-${koloId.slice(0, 6)}` } }),
+          prisma.koloMember.deleteMany({ where: { koloId } }),
+          prisma.koloInvite.updateMany({ where: { koloId, status: "PENDING" }, data: { status: "EXPIRED" } }),
+        ]);
         const leader = await interaction.client.users.fetch(kolo.leaderId).catch(() => null);
         await leader?.send(`❌ Zgłoszenie koła **${kolo.name}** zostało odrzucone przez administrację.`).catch(() => null);
         await logAction("kolo_rejected", interaction.user.id, koloId, {});
@@ -407,9 +443,6 @@ class KoloService {
 
   // ==================== INFRASTRUKTURA (kategoria/kanały/role) ====================
 
-  /** Tworzy kategorię + 6 kanałów + 4 role dla zatwierdzonego koła, nadaje rolę liderowi
-   * od razu (on zarejestrował koło, zgoda jest dorozumiana), a pozostałym członkom
-   * wysyła DM z prośbą o zgodę - ich role zostaną nadane dopiero po kliknięciu. */
   /** Tworzy kategorię + 6 kanałów + 4 role dla zatwierdzonego koła NA DRUGIM
    * SERWERZE (KOLA_GUILD_ID) - Koła Naukowe żyją na innym serwerze niż
    * reszta bota. Nadaje rolę liderowi od razu (on zarejestrował koło,
@@ -594,12 +627,30 @@ class KoloService {
       return interaction.editReply({ content: `✅ Gotowe! Masz teraz dostęp do kanałów koła **${kolo.name}**.`, embeds: [], components: [] });
     } catch (err) {
       await logError("koloService", "CONSENT_ERROR", err.message, { koloId, userId, stack: err.stack });
+      // deferUpdate() już poszedł, więc musimy odpowiedzieć editReply -
+      // inaczej użytkownik wisi na "myślącym" przycisku bez końca.
+      return interaction.editReply({ content: "❌ Błąd serwera. Spróbuj ponownie.", embeds: [], components: [] }).catch(() => null);
     }
   }
 
   async _getManagedKolo(userId) {
     const membership = await prisma.koloMember.findFirst({
       where: { userId, role: { in: ["LEADER", "VICE_LEADER"] } },
+      include: { kolo: true },
+    });
+    if (!membership || membership.kolo.status !== "ACTIVE") return null;
+    return membership;
+  }
+
+  /**
+   * Ponowna weryfikacja uprawnień w handlerach "drugiego kroku" (wybór
+   * osoby, wybór badania, modale). Pierwszy krok (menu) już to sprawdził,
+   * ale między krokami role mogły się zmienić - nie ufamy samemu customId.
+   * Zwraca membership albo null (i wtedy handler ma przerwać).
+   */
+  async _requireManager(userId, koloId) {
+    const membership = await prisma.koloMember.findFirst({
+      where: { userId, koloId, role: { in: ["LEADER", "VICE_LEADER"] } },
       include: { kolo: true },
     });
     if (!membership || membership.kolo.status !== "ACTIVE") return null;
@@ -705,7 +756,7 @@ class KoloService {
         {
           name: "Badania",
           value: researches.length
-            ? researches.map((r) => `**${r.topic}** — ${r.status}`).join("\n")
+            ? researches.map((r) => `**${r.topic}** — ${r.status}`).join("\n").slice(0, 1000)
             : "Brak",
         }
       );
@@ -717,9 +768,10 @@ class KoloService {
 
   async handleManageTargetSelect(interaction, action, koloId) {
     await interaction.deferUpdate();
+    const managed = await this._requireManager(interaction.user.id, koloId);
+    if (!managed) return interaction.editReply({ content: "❌ Musisz być liderem lub wiceliderem tego koła.", components: [] });
     const targetId = interaction.values[0];
-    const kolo = await prisma.kolo.findUnique({ where: { id: koloId } });
-    if (!kolo || kolo.status !== "ACTIVE") return interaction.editReply({ content: "❌ Koło nieaktywne.", components: [] });
+    const kolo = managed.kolo;
 
     if (action === "invite") return this._doInvite(interaction, kolo, targetId);
     if (action === "kick") return this._doKick(interaction, kolo, targetId);
@@ -728,41 +780,75 @@ class KoloService {
     if (action === "assign_research") return this._doAssignResearchPickResearch(interaction, kolo, targetId);
   }
 
-  async _doInvite(interaction, kolo, targetId) {
+  /**
+   * Wspólny rdzeń zapraszania - używany i przez menu zarządzania, i przez
+   * komendę /kolo zaprosz. Zwraca { ok, message } zamiast odpowiadać na
+   * interakcję, bo oba wołania odpowiadają inaczej (editReply vs reply).
+   */
+  async _inviteCore(client, kolo, targetId, actorUser) {
     const memberCount = await prisma.koloMember.count({ where: { koloId: kolo.id } });
-    if (memberCount >= MAX_MEMBERS) return interaction.editReply({ content: `❌ Koło ma już maksymalną liczbę członków (${MAX_MEMBERS}).`, components: [] });
+    if (memberCount >= MAX_MEMBERS) return { ok: false, message: `❌ Koło ma już maksymalną liczbę członków (${MAX_MEMBERS}).` };
 
     const already = await prisma.koloMember.findFirst({ where: { userId: targetId } });
-    if (already) return interaction.editReply({ content: "❌ Ta osoba należy już do jakiegoś koła.", components: [] });
+    if (already) return { ok: false, message: "❌ Ta osoba należy już do jakiegoś koła." };
 
     const pendingInvite = await prisma.koloInvite.findFirst({ where: { koloId: kolo.id, userId: targetId, status: "PENDING" } });
-    if (pendingInvite) return interaction.editReply({ content: "❌ Ta osoba ma już wysłane zaproszenie.", components: [] });
+    if (pendingInvite) return { ok: false, message: "❌ Ta osoba ma już wysłane zaproszenie." };
 
-    const invite = await prisma.koloInvite.create({ data: { koloId: kolo.id, userId: targetId, expiresAt: new Date(Date.now() + GRACE_PERIOD_MS) } });
-    const leaderUser = await interaction.client.users.fetch(kolo.leaderId).catch(() => null);
-    await this._sendInviteDm(interaction.client, invite, kolo, leaderUser || interaction.user);
-    return interaction.editReply({ content: `✅ Wysłano zaproszenie do <@${targetId}>.`, components: [] });
+    // Upsert, nie create: (koloId, userId) jest @unique, a ktoś mógł już
+    // kiedyś dostać/odrzucić zaproszenie do tego koła - create rzuciłby P2002.
+    const invite = await prisma.koloInvite.upsert({
+      where: { koloId_userId: { koloId: kolo.id, userId: targetId } },
+      update: { status: "PENDING", expiresAt: new Date(Date.now() + GRACE_PERIOD_MS) },
+      create: { koloId: kolo.id, userId: targetId, expiresAt: new Date(Date.now() + GRACE_PERIOD_MS) },
+    });
+    const leaderUser = await client.users.fetch(kolo.leaderId).catch(() => null);
+    await this._sendInviteDm(client, invite, kolo, leaderUser || actorUser);
+    await logAction("kolo_invite_sent", actorUser.id, kolo.id, { targetId });
+    return { ok: true, message: `✅ Wysłano zaproszenie do <@${targetId}>.` };
+  }
+
+  async _doInvite(interaction, kolo, targetId) {
+    const result = await this._inviteCore(interaction.client, kolo, targetId, interaction.user);
+    return interaction.editReply({ content: result.message, components: [] });
+  }
+
+  /**
+   * Wspólny rdzeń wyrzucania. Role zdejmujemy ZAWSZE na serwerze Kół
+   * (getKolaGuild), nie na interaction.guild - komenda /kolo może być
+   * wywołana z głównego serwera, gdzie tych ról nie ma.
+   */
+  async _kickCore(client, kolo, targetId) {
+    if (targetId === kolo.leaderId) return { ok: false, message: "❌ Nie możesz wyrzucić lidera. Użyj zmiany lidera." };
+
+    const targetMembership = await prisma.koloMember.findUnique({ where: { koloId_userId: { koloId: kolo.id, userId: targetId } } });
+    if (!targetMembership) return { ok: false, message: "❌ Ta osoba nie należy do koła." };
+
+    await prisma.koloMember.delete({ where: { id: targetMembership.id } });
+    // Sprzątanie przydziałów do badań koła (inaczej wisiałyby sieroty)
+    const researchIds = (await prisma.research.findMany({ where: { koloId: kolo.id }, select: { id: true } })).map((r) => r.id);
+    if (researchIds.length > 0) {
+      await prisma.researchMember.deleteMany({ where: { researchId: { in: researchIds }, userId: targetId } });
+    }
+
+    const guild = getKolaGuild(client);
+    if (guild) {
+      const member = await guild.members.fetch(targetId).catch(() => null);
+      for (const roleId of [kolo.roleIdDivider, kolo.roleIdLeader, kolo.roleIdVice, kolo.roleIdMember]) {
+        if (roleId) await member?.roles.remove(roleId).catch(() => null);
+      }
+      const customRoles = await prisma.koloCustomRole.findMany({ where: { koloId: kolo.id } });
+      for (const cr of customRoles) await member?.roles.remove(cr.roleId).catch(() => null);
+    }
+
+    await this._checkMinimumMembers(client, kolo.id);
+    return { ok: true, message: `✅ Wyrzucono <@${targetId}> z koła.` };
   }
 
   async _doKick(interaction, kolo, targetId) {
-    if (targetId === kolo.leaderId) return interaction.editReply({ content: "❌ Nie możesz wyrzucić lidera. Użyj zmiany lidera.", components: [] });
-
-    const targetMembership = await prisma.koloMember.findUnique({ where: { koloId_userId: { koloId: kolo.id, userId: targetId } } });
-    if (!targetMembership) return interaction.editReply({ content: "❌ Ta osoba nie należy do koła.", components: [] });
-
-    await prisma.koloMember.delete({ where: { id: targetMembership.id } });
-
-    const guild = interaction.guild;
-    const member = await guild.members.fetch(targetId).catch(() => null);
-    for (const roleId of [kolo.roleIdDivider, kolo.roleIdLeader, kolo.roleIdVice, kolo.roleIdMember]) {
-      if (roleId) await member?.roles.remove(roleId).catch(() => null);
-    }
-    const customRoles = await prisma.koloCustomRole.findMany({ where: { koloId: kolo.id } });
-    for (const cr of customRoles) await member?.roles.remove(cr.roleId).catch(() => null);
-
-    await this._checkMinimumMembers(interaction.client, kolo.id);
-    await logAction("kolo_member_kicked", interaction.user.id, kolo.id, { targetId });
-    return interaction.editReply({ content: `✅ Wyrzucono <@${targetId}> z koła.`, components: [] });
+    const result = await this._kickCore(interaction.client, kolo, targetId);
+    if (result.ok) await logAction("kolo_member_kicked", interaction.user.id, kolo.id, { targetId });
+    return interaction.editReply({ content: result.message, components: [] });
   }
 
   async _doSetVice(interaction, kolo, targetId) {
@@ -770,7 +856,10 @@ class KoloService {
     if (!targetMembership) return interaction.editReply({ content: "❌ Ta osoba nie należy do koła.", components: [] });
     if (targetId === kolo.leaderId) return interaction.editReply({ content: "❌ Lider nie może być jednocześnie wiceliderem.", components: [] });
 
-    const guild = interaction.guild;
+    // Role koła istnieją TYLKO na serwerze Kół - interaction.guild to zwykle
+    // główny serwer, gdzie fetch rzuciłby błąd i role nigdy by się nie zmieniły.
+    const guild = getKolaGuild(interaction.client);
+    if (!guild) return interaction.editReply({ content: "❌ Błąd konfiguracji serwera Kół Naukowych.", components: [] });
 
     // zdejmij starego wicelidera, jeśli był
     const oldVice = await prisma.koloMember.findFirst({ where: { koloId: kolo.id, role: "VICE_LEADER" } });
@@ -793,11 +882,11 @@ class KoloService {
     const targetMembership = await prisma.koloMember.findUnique({ where: { koloId_userId: { koloId: kolo.id, userId: targetId } } });
     if (!targetMembership) return interaction.editReply({ content: "❌ Nowy lider musi być członkiem koła.", components: [] });
 
-    const ai = await this._aiScore("zmiana_lidera", `Koło: ${kolo.name}\nObecny lider: ${kolo.leaderId}\nProponowany nowy lider: ${targetId}`);
-    const request = await prisma.koloChangeRequest.create({
-      data: { koloId: kolo.id, requestedBy: interaction.user.id, type: "LEADER", payload: { newLeaderId: targetId }, aiScore: ai.score, aiAnalysis: ai },
-    });
-    await this._postChangeReviewEmbed(interaction.client, kolo, "Zmiana lidera", `<@${targetId}>`, ai, request.id);
+    await this._createChangeRequest(
+      interaction.client, kolo, interaction.user.id, "LEADER", { newLeaderId: targetId },
+      "zmiana_lidera", `Koło: ${kolo.name}\nObecny lider: ${kolo.leaderId}\nProponowany nowy lider: ${targetId}`,
+      "Zmiana lidera", `<@${targetId}>`
+    );
     return interaction.editReply({ content: "✅ Prośba o zmianę lidera wysłana do administracji.", components: [] });
   }
 
@@ -814,47 +903,67 @@ class KoloService {
 
   // ==================== MODALE (rename/relogo/newrole/startresearch) ====================
 
+  /**
+   * Wspólny rdzeń próśb o zmianę (AI + zapis + embed do recenzji) -
+   * używany przez modale z menu zarządzania i przez /kolo prosba.
+   */
+  async _createChangeRequest(client, kolo, requestedById, type, payload, aiKind, aiDetails, label, valueLabel) {
+    const ai = await this._aiScore(aiKind, aiDetails);
+    const request = await prisma.koloChangeRequest.create({
+      data: { koloId: kolo.id, requestedBy: requestedById, type, payload, aiScore: ai.score, aiAnalysis: ai },
+    });
+    await this._postChangeReviewEmbed(client, kolo, label, valueLabel, ai, request.id);
+    await logAction("kolo_change_requested", requestedById, kolo.id, { type, payload });
+    return request;
+  }
+
   async handleRenameModalSubmit(interaction, koloId) {
     await interaction.deferReply({ ephemeral: true });
+    const managed = await this._requireManager(interaction.user.id, koloId);
+    if (!managed) return interaction.editReply({ content: "❌ Musisz być liderem lub wiceliderem tego koła." });
     const newName = interaction.fields.getTextInputValue("nazwa").trim();
-    const kolo = await prisma.kolo.findUnique({ where: { id: koloId } });
+    const kolo = managed.kolo;
     const taken = await prisma.kolo.findUnique({ where: { name: newName } });
     if (taken) return interaction.editReply({ content: "❌ Koło o tej nazwie już istnieje." });
 
-    const ai = await this._aiScore("zmiana_nazwy", `Koło: ${kolo.name}\nNowa nazwa: ${newName}`);
-    const request = await prisma.koloChangeRequest.create({
-      data: { koloId, requestedBy: interaction.user.id, type: "NAME", payload: { newName }, aiScore: ai.score, aiAnalysis: ai },
-    });
-    await this._postChangeReviewEmbed(interaction.client, kolo, "Zmiana nazwy", newName, ai, request.id);
+    await this._createChangeRequest(
+      interaction.client, kolo, interaction.user.id, "NAME", { newName },
+      "zmiana_nazwy", `Koło: ${kolo.name}\nNowa nazwa: ${newName}`,
+      "Zmiana nazwy", newName
+    );
     return interaction.editReply({ content: "✅ Prośba wysłana do administracji." });
   }
 
   async handleRelogoModalSubmit(interaction, koloId) {
     await interaction.deferReply({ ephemeral: true });
+    const managed = await this._requireManager(interaction.user.id, koloId);
+    if (!managed) return interaction.editReply({ content: "❌ Musisz być liderem lub wiceliderem tego koła." });
     const newLogoUrl = interaction.fields.getTextInputValue("logo").trim();
-    const kolo = await prisma.kolo.findUnique({ where: { id: koloId } });
+    const kolo = managed.kolo;
 
-    const ai = await this._aiScore("zmiana_logo", `Koło: ${kolo.name}\nNowy link logo: ${newLogoUrl}`);
-    const request = await prisma.koloChangeRequest.create({
-      data: { koloId, requestedBy: interaction.user.id, type: "LOGO", payload: { newLogoUrl }, aiScore: ai.score, aiAnalysis: ai },
-    });
-    await this._postChangeReviewEmbed(interaction.client, kolo, "Zmiana logo", newLogoUrl, ai, request.id);
+    await this._createChangeRequest(
+      interaction.client, kolo, interaction.user.id, "LOGO", { newLogoUrl },
+      "zmiana_logo", `Koło: ${kolo.name}\nNowy link logo: ${newLogoUrl}`,
+      "Zmiana logo", newLogoUrl
+    );
     return interaction.editReply({ content: "✅ Prośba wysłana do administracji." });
   }
 
   async handleNewRoleModalSubmit(interaction, koloId) {
     await interaction.deferReply({ ephemeral: true });
+    const managed = await this._requireManager(interaction.user.id, koloId);
+    if (!managed) return interaction.editReply({ content: "❌ Musisz być liderem lub wiceliderem tego koła." });
     const roleName = interaction.fields.getTextInputValue("nazwa").trim();
-    const kolo = await prisma.kolo.findUnique({ where: { id: koloId } });
+    const kolo = managed.kolo;
 
     const existing = await prisma.koloCustomRole.findUnique({ where: { koloId_name: { koloId, name: roleName } } });
     if (existing) return interaction.editReply({ content: "❌ Taka rola już istnieje w tym kole." });
 
-    const ai = await this._aiScore("nowa_rola", `Koło: ${kolo.name}\nProponowana nazwa roli: ${roleName}`);
-    const request = await prisma.koloChangeRequest.create({
-      data: { koloId, requestedBy: interaction.user.id, type: "NEW_ROLE", payload: { roleName }, aiScore: ai.score, aiAnalysis: ai },
-    });
-    await this._postChangeReviewEmbed(interaction.client, kolo, "Nowa rola", `• ${roleName} •`, ai, request.id);
+    await this._createChangeRequest(
+      interaction.client, kolo, interaction.user.id, "NEW_ROLE", { roleName },
+      "nowa_rola", `Koło: ${kolo.name}\nProponowana nazwa roli: ${roleName}`,
+      "Nowa rola", `• ${roleName} •`
+    );
     return interaction.editReply({ content: "✅ Prośba wysłana do administracji." });
   }
 
@@ -987,7 +1096,14 @@ class KoloService {
       await category?.delete("Koło Naukowe rozwiązane").catch(() => null);
     }
 
-    await prisma.kolo.update({ where: { id: kolo.id }, data: { status: "DISSOLVED" } });
+    // Nazwa jest @unique - rozwiązane koło musi ją zwolnić. Członków i
+    // wiszące zaproszenia czyścimy, żeby reguła "jedno koło" nie blokowała
+    // byłych członków na zawsze.
+    await prisma.$transaction([
+      prisma.kolo.update({ where: { id: kolo.id }, data: { status: "DISSOLVED", name: `${kolo.name}#rozwiazane-${kolo.id.slice(0, 6)}` } }),
+      prisma.koloMember.deleteMany({ where: { koloId: kolo.id } }),
+      prisma.koloInvite.updateMany({ where: { koloId: kolo.id, status: "PENDING" }, data: { status: "EXPIRED" } }),
+    ]);
   }
 
   // handleChangeReview obsługuje NAME/LOGO/LEADER/NEW_ROLE; DISSOLVE ma inny efekt (usuwanie),
@@ -1023,45 +1139,55 @@ class KoloService {
     return RESEARCH_CAPACITY[nextActiveCount] ?? null;
   }
 
-  async handleStartResearchModalSubmit(interaction, koloId) {
-    await interaction.deferReply({ ephemeral: true });
-    const kolo = await prisma.kolo.findUnique({ where: { id: koloId } });
-    const topicInput = interaction.fields.getTextInputValue("temat").trim();
-
+  /**
+   * Wspólny rdzeń rozpoczynania badania - menu zarządzania i komenda
+   * /kolo badanie. Zwraca tekst odpowiedzi.
+   */
+  async _startResearchCore(client, kolo, requestedById, topicInput) {
+    const koloId = kolo.id;
     const activeCount = await prisma.research.count({ where: { koloId, status: { in: ["ACTIVE", "PAUSED"] } } });
     const nextCount = activeCount + 1;
     if (nextCount > MAX_CONCURRENT_RESEARCH) {
-      return interaction.editReply({ content: `❌ Koło może prowadzić maksymalnie ${MAX_CONCURRENT_RESEARCH} badania naraz.` });
+      return `❌ Koło może prowadzić maksymalnie ${MAX_CONCURRENT_RESEARCH} badania naraz.`;
     }
     const required = this._capacityRequirementFor(nextCount);
     const memberCount = await prisma.koloMember.count({ where: { koloId } });
-    if (memberCount < required) {
-      return interaction.editReply({ content: `❌ Do prowadzenia ${nextCount}. jednoczesnego badania koło potrzebuje min. ${required} osób (ma ${memberCount}).` });
+    if (required !== null && memberCount < required) {
+      return `❌ Do prowadzenia ${nextCount}. jednoczesnego badania koło potrzebuje min. ${required} osób (ma ${memberCount}).`;
     }
 
-    const officialTopic = await prisma.researchTopic.findFirst({ where: { title: topicInput, active: true } });
+    // Duplikat: to samo badanie już trwa albo czeka na decyzję.
+    const duplicate = await prisma.research.findFirst({
+      where: { koloId, topic: { equals: topicInput, mode: "insensitive" }, status: { in: ["ACTIVE", "PAUSED", "PENDING_REVIEW"] } },
+    });
+    if (duplicate) return `❌ Badanie **${duplicate.topic}** już trwa lub czeka na decyzję.`;
+
+    // Dopasowanie oficjalnego tematu case-insensitive (inna wielkość liter
+    // nie powinna spychać tematu na ścieżkę "własny do akceptacji").
+    const officialTopic = await prisma.researchTopic.findFirst({ where: { title: { equals: topicInput, mode: "insensitive" }, active: true } });
 
     if (officialTopic) {
       const research = await prisma.research.create({
         data: { koloId, topic: officialTopic.title, isCustomTopic: false, status: "ACTIVE", startedAt: new Date() },
       });
-      await this._postResearchUpdate(interaction.client, kolo, research);
-      await logAction("kolo_research_started", interaction.user.id, koloId, { researchId: research.id, topic: officialTopic.title });
-      return interaction.editReply({ content: `✅ Rozpoczęto badanie: **${officialTopic.title}**.` });
+      await this._postResearchUpdate(client, kolo, research);
+      await logAction("kolo_research_started", requestedById, koloId, { researchId: research.id, topic: officialTopic.title });
+      return `✅ Rozpoczęto badanie: **${officialTopic.title}**.`;
     }
 
     const ai = await this._aiScore("wlasny_temat_badania", `Koło: ${kolo.name}\nProponowany temat: ${topicInput}`);
     const research = await prisma.research.create({
       data: { koloId, topic: topicInput, isCustomTopic: true, status: "PENDING_REVIEW", aiScore: ai.score, aiAnalysis: ai },
     });
+    await logAction("kolo_research_proposed", requestedById, koloId, { researchId: research.id, topic: topicInput });
 
-    const channel = await this._getReviewChannel(interaction.client);
+    const channel = await this._getReviewChannel(client);
     if (channel) {
       const embed = new EmbedBuilder()
         .setTitle("🔬 Propozycja własnego tematu badania")
         .addFields(
           { name: "Koło", value: kolo.name, inline: true },
-          { name: "Temat", value: topicInput },
+          { name: "Temat", value: topicInput.slice(0, 1000) },
           { name: "AI Score", value: `${Math.round(ai.score * 100)}%` }
         )
         .setColor(0xd69e2e);
@@ -1072,7 +1198,16 @@ class KoloService {
       await channel.send({ embeds: [embed], components: [row] });
     }
 
-    return interaction.editReply({ content: "✅ Własny temat wysłany do oceny AI i administracji. Poczekaj na decyzję." });
+    return "✅ Własny temat wysłany do oceny AI i administracji. Poczekaj na decyzję.";
+  }
+
+  async handleStartResearchModalSubmit(interaction, koloId) {
+    await interaction.deferReply({ ephemeral: true });
+    const managed = await this._requireManager(interaction.user.id, koloId);
+    if (!managed) return interaction.editReply({ content: "❌ Musisz być liderem lub wiceliderem tego koła." });
+    const topicInput = interaction.fields.getTextInputValue("temat").trim();
+    const message = await this._startResearchCore(interaction.client, managed.kolo, interaction.user.id, topicInput);
+    return interaction.editReply({ content: message });
   }
 
   async handleResearchReview(interaction, researchId, approve) {
@@ -1116,17 +1251,17 @@ class KoloService {
     if (!channel) return;
 
     const members = await prisma.researchMember.findMany({ where: { researchId: research.id } });
-    const topicInfo = !research.isCustomTopic ? await prisma.researchTopic.findFirst({ where: { title: research.topic } }) : null;
+    // (Usunięto martwe zapytanie o ResearchTopic.description - model nie ma
+    // takiego pola, więc warunek nigdy nie był prawdziwy.)
 
     const embed = new EmbedBuilder()
-      .setTitle(`🔬 ${research.topic}`)
+      .setTitle(`🔬 ${research.topic}`.slice(0, 256))
       .addFields(
         { name: "Status", value: this._researchStatusLabel(research.status), inline: true },
-        { name: "Przydzieleni", value: members.length ? members.map((m) => `<@${m.userId}>`).join(", ") : "Brak", inline: true }
+        { name: "Przydzieleni", value: members.length ? members.map((m) => `<@${m.userId}>`).join(", ").slice(0, 1000) : "Brak", inline: true }
       )
       .setColor(kolo.colorHex || 0x2b6cb0)
       .setFooter({ text: research.isCustomTopic ? "Własny temat" : "Temat z listy oficjalnej" });
-    if (topicInfo?.description) embed.setDescription(topicInfo.description);
 
     await channel.send({ embeds: [embed] }).catch(() => null);
   }
@@ -1137,9 +1272,11 @@ class KoloService {
 
   async handleResearchPickSelect(interaction, action, koloId, extra) {
     await interaction.deferUpdate();
+    const managed = await this._requireManager(interaction.user.id, koloId);
+    if (!managed) return interaction.editReply({ content: "❌ Musisz być liderem lub wiceliderem tego koła.", components: [] });
     const researchId = interaction.values[0];
     const research = await prisma.research.findUnique({ where: { id: researchId }, include: { kolo: true } });
-    if (!research) return interaction.editReply({ content: "❌ Nie znaleziono badania.", components: [] });
+    if (!research || research.koloId !== koloId) return interaction.editReply({ content: "❌ Nie znaleziono badania.", components: [] });
 
     if (action === "pause_research") {
       if (research.status !== "ACTIVE") return interaction.editReply({ content: "❌ To badanie nie jest aktywne.", components: [] });
@@ -1167,6 +1304,184 @@ class KoloService {
       await this._postResearchUpdate(interaction.client, research.kolo, research);
       return interaction.editReply({ content: `✅ Przydzielono <@${targetId}> do badania **${research.topic}**.`, components: [] });
     }
+  }
+
+  // ==================== KOMENDY /kolo ====================
+  // (Te metody woła commands/academic/kolo.js - wcześniej nie istniały,
+  // więc KAŻDY podkomenda /kolo crashowała z TypeError.)
+
+  /**
+   * Koło, do którego można zapraszać: aktywne LUB w trakcie zbierania
+   * członków (lider doprasza brakujące osoby po odrzutach).
+   */
+  async _getInvitableKolo(userId) {
+    const membership = await prisma.koloMember.findFirst({
+      where: { userId, role: { in: ["LEADER", "VICE_LEADER"] } },
+      include: { kolo: true },
+    });
+    if (!membership || !["ACTIVE", "PENDING_MEMBERS"].includes(membership.kolo.status)) return null;
+    return membership;
+  }
+
+  async cmdInvite(interaction) {
+    await interaction.deferReply({ ephemeral: true });
+    const managed = await this._getInvitableKolo(interaction.user.id);
+    if (!managed) return interaction.editReply({ content: "❌ Musisz być liderem lub wiceliderem koła (aktywnego lub w trakcie zakładania)." });
+    const target = interaction.options.getUser("osoba");
+    if (target.id === interaction.user.id) return interaction.editReply({ content: "❌ Nie możesz zaprosić samego siebie." });
+    if (target.bot) return interaction.editReply({ content: "❌ Nie możesz zaprosić bota." });
+    const result = await this._inviteCore(interaction.client, managed.kolo, target.id, interaction.user);
+    return interaction.editReply({ content: result.message });
+  }
+
+  async cmdKick(interaction) {
+    await interaction.deferReply({ ephemeral: true });
+    const managed = await this._getManagedKolo(interaction.user.id);
+    if (!managed) return interaction.editReply({ content: "❌ Musisz być liderem lub wiceliderem aktywnego koła." });
+    const target = interaction.options.getUser("osoba");
+    const result = await this._kickCore(interaction.client, managed.kolo, target.id);
+    if (result.ok) await logAction("kolo_member_kicked", interaction.user.id, managed.kolo.id, { targetId: target.id, via: "command" });
+    return interaction.editReply({ content: result.message });
+  }
+
+  async cmdChangeRequest(interaction) {
+    await interaction.deferReply({ ephemeral: true });
+    const managed = await this._getManagedKolo(interaction.user.id);
+    if (!managed) return interaction.editReply({ content: "❌ Musisz być liderem lub wiceliderem aktywnego koła." });
+    const kolo = managed.kolo;
+    const type = interaction.options.getString("typ");
+    const wartosc = interaction.options.getString("wartosc").trim();
+    const NL = String.fromCharCode(10); // nowa linia (unikamy escape w szablonie)
+
+    if (type === "NAME") {
+      const taken = await prisma.kolo.findUnique({ where: { name: wartosc } });
+      if (taken) return interaction.editReply({ content: "❌ Koło o tej nazwie już istnieje." });
+      await this._createChangeRequest(
+        interaction.client, kolo, interaction.user.id, "NAME", { newName: wartosc },
+        "zmiana_nazwy", `Koło: ${kolo.name}${NL}Nowa nazwa: ${wartosc}`,
+        "Zmiana nazwy", wartosc
+      );
+    } else if (type === "LOGO") {
+      await this._createChangeRequest(
+        interaction.client, kolo, interaction.user.id, "LOGO", { newLogoUrl: wartosc },
+        "zmiana_logo", `Koło: ${kolo.name}${NL}Nowy link logo: ${wartosc}`,
+        "Zmiana logo", wartosc
+      );
+    } else if (type === "LEADER") {
+      // Akceptujemy mention (<@id>, <@!id>) albo gołe ID.
+      const match = wartosc.match(/^(?:<@!?(\d+)>|(\d+))$/);
+      const newLeaderId = match ? (match[1] || match[2]) : null;
+      if (!newLeaderId) return interaction.editReply({ content: "❌ Podaj nowego lidera jako @wzmiankę lub ID (np. @Janek)." });
+      const targetMembership = await prisma.koloMember.findUnique({ where: { koloId_userId: { koloId: kolo.id, userId: newLeaderId } } });
+      if (!targetMembership) return interaction.editReply({ content: "❌ Nowy lider musi być członkiem koła." });
+      await this._createChangeRequest(
+        interaction.client, kolo, interaction.user.id, "LEADER", { newLeaderId },
+        "zmiana_lidera", `Koło: ${kolo.name}${NL}Obecny lider: ${kolo.leaderId}${NL}Proponowany nowy lider: ${newLeaderId}`,
+        "Zmiana lidera", `<@${newLeaderId}>`
+      );
+    }
+    return interaction.editReply({ content: "✅ Prośba wysłana do administracji." });
+  }
+
+  async cmdStartResearch(interaction) {
+    await interaction.deferReply({ ephemeral: true });
+    const managed = await this._getManagedKolo(interaction.user.id);
+    if (!managed) return interaction.editReply({ content: "❌ Musisz być liderem lub wiceliderem aktywnego koła." });
+    const topicInput = interaction.options.getString("temat").trim();
+    const message = await this._startResearchCore(interaction.client, managed.kolo, interaction.user.id, topicInput);
+    return interaction.editReply({ content: message });
+  }
+
+  async cmdManageResearch(interaction) {
+    await interaction.deferReply({ ephemeral: true });
+    const sub = interaction.options.getSubcommand();
+
+    if (sub === "lista") {
+      // Podgląd dla każdego członka aktywnego koła (nie tylko zarządu).
+      const membership = await prisma.koloMember.findFirst({ where: { userId: interaction.user.id }, include: { kolo: true } });
+      if (!membership || membership.kolo.status !== "ACTIVE") {
+        return interaction.editReply({ content: "❌ Nie należysz do żadnego aktywnego koła." });
+      }
+      const researches = await prisma.research.findMany({ where: { koloId: membership.koloId }, orderBy: { createdAt: "desc" } });
+      if (researches.length === 0) return interaction.editReply({ content: `🔬 Koło **${membership.kolo.name}** nie prowadzi obecnie żadnych badań.` });
+      const lines = researches.map((r) => `${this._researchStatusLabel(r.status)} **${r.topic}**${r.isCustomTopic ? " (własny)" : ""}`);
+      const embed = new EmbedBuilder()
+        .setTitle(`🔬 Badania koła ${membership.kolo.name}`)
+        .setDescription(lines.join("\n").slice(0, 4000))
+        .setColor(membership.kolo.colorHex || 0x2b6cb0);
+      return interaction.editReply({ embeds: [embed] });
+    }
+
+    const managed = await this._getManagedKolo(interaction.user.id);
+    if (!managed) return interaction.editReply({ content: "❌ Musisz być liderem lub wiceliderem aktywnego koła." });
+    const kolo = managed.kolo;
+    // Autocomplete zwraca ID badania jako value.
+    const researchId = interaction.options.getString("badanie");
+    const research = await prisma.research.findFirst({ where: { id: researchId, koloId: kolo.id } });
+    if (!research) return interaction.editReply({ content: "❌ Nie znaleziono badania (wybierz je z podpowiedzi)." });
+
+    if (sub === "zatrzymaj") {
+      if (research.status !== "ACTIVE") return interaction.editReply({ content: "❌ To badanie nie jest aktywne." });
+      await prisma.research.update({ where: { id: research.id }, data: { status: "PAUSED", pausedAt: new Date() } });
+      await this._postResearchUpdate(interaction.client, kolo, { ...research, status: "PAUSED" });
+      await logAction("kolo_research_paused", interaction.user.id, kolo.id, { researchId: research.id });
+      return interaction.editReply({ content: `⏸️ Badanie **${research.topic}** zatrzymane.` });
+    }
+
+    if (sub === "wznow") {
+      if (research.status !== "PAUSED") return interaction.editReply({ content: "❌ To badanie nie jest zatrzymane." });
+      await prisma.research.update({ where: { id: research.id }, data: { status: "ACTIVE", pausedAt: null } });
+      await this._postResearchUpdate(interaction.client, kolo, { ...research, status: "ACTIVE" });
+      await logAction("kolo_research_resumed", interaction.user.id, kolo.id, { researchId: research.id });
+      return interaction.editReply({ content: `▶️ Badanie **${research.topic}** wznowione.` });
+    }
+
+    if (sub === "przydziel") {
+      if (!["ACTIVE", "PAUSED"].includes(research.status)) {
+        return interaction.editReply({ content: "❌ Do tego badania nie można przydzielać (nie jest prowadzone)." });
+      }
+      const target = interaction.options.getUser("osoba");
+      const targetMembership = await prisma.koloMember.findUnique({ where: { koloId_userId: { koloId: kolo.id, userId: target.id } } });
+      if (!targetMembership) return interaction.editReply({ content: "❌ Ta osoba nie należy do koła." });
+      const existing = await prisma.researchMember.findUnique({ where: { researchId_userId: { researchId: research.id, userId: target.id } } });
+      if (existing) return interaction.editReply({ content: "❌ Ta osoba jest już przydzielona do tego badania." });
+      await prisma.researchMember.create({ data: { researchId: research.id, userId: target.id } });
+      await this._postResearchUpdate(interaction.client, kolo, research);
+      return interaction.editReply({ content: `✅ Przydzielono <@${target.id}> do badania **${research.topic}**.` });
+    }
+  }
+
+  /**
+   * /kolo opusc - dobrowolne odejście z koła (każdy oprócz lidera;
+   * lider musi najpierw przekazać koło albo je rozwiązać).
+   */
+  async cmdLeave(interaction) {
+    await interaction.deferReply({ ephemeral: true });
+    const membership = await prisma.koloMember.findFirst({ where: { userId: interaction.user.id }, include: { kolo: true } });
+    if (!membership || membership.kolo.status !== "ACTIVE") {
+      return interaction.editReply({ content: "❌ Nie należysz do żadnego aktywnego koła." });
+    }
+    if (membership.role === "LEADER") {
+      return interaction.editReply({ content: "❌ Lider nie może opuścić koła. Przekaż najpierw rolę lidera (`/kolo prosba` → Lider) albo rozwiąż koło z kanału ⚒️zarządzaj-kołem." });
+    }
+    const kolo = membership.kolo;
+    await prisma.koloMember.delete({ where: { id: membership.id } });
+    const researchIds = (await prisma.research.findMany({ where: { koloId: kolo.id }, select: { id: true } })).map((r) => r.id);
+    if (researchIds.length > 0) {
+      await prisma.researchMember.deleteMany({ where: { researchId: { in: researchIds }, userId: interaction.user.id } });
+    }
+    const guild = getKolaGuild(interaction.client);
+    if (guild) {
+      const member = await guild.members.fetch(interaction.user.id).catch(() => null);
+      for (const roleId of [kolo.roleIdDivider, kolo.roleIdLeader, kolo.roleIdVice, kolo.roleIdMember]) {
+        if (roleId) await member?.roles.remove(roleId).catch(() => null);
+      }
+      const customRoles = await prisma.koloCustomRole.findMany({ where: { koloId: kolo.id } });
+      for (const cr of customRoles) await member?.roles.remove(cr.roleId).catch(() => null);
+    }
+    await this._checkMinimumMembers(interaction.client, kolo.id);
+    await logAction("kolo_member_left", interaction.user.id, kolo.id, {});
+    return interaction.editReply({ content: `✅ Opuściłeś koło **${kolo.name}**.` });
   }
 
   // ==================== POMOCNICZE ====================

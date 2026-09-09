@@ -1,17 +1,12 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
+import { encrypt } from "@/lib/crypto";
 import { revalidatePath } from "next/cache";
-import crypto from "crypto";
 
-const KEY = Buffer.from(process.env.ENCRYPTION_KEY!, "base64");
-
-function encrypt(plainText: string) {
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv("aes-256-gcm", KEY, iv);
-  const encrypted = Buffer.concat([cipher.update(plainText, "utf8"), cipher.final()]);
-  const authTag = cipher.getAuthTag();
-  return Buffer.concat([iv, authTag, encrypted]).toString("base64");
+function numOr(raw: FormDataEntryValue | null, fallback: number): number {
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 export async function updateAiConfig(formData: FormData) {
@@ -19,12 +14,11 @@ export async function updateAiConfig(formData: FormData) {
   const premiumChatModelRaw = String(formData.get("premiumChatModel") ?? "").trim();
   const premiumChatModel = premiumChatModelRaw || null;
   const automodModel = String(formData.get("automodModel") ?? "");
-  const automodThreshold = Number(formData.get("automodThreshold") ?? 0.7);
+  // Guard przed NaN (puste/złe pole) + clamp do sensownego zakresu progu.
+  const automodThreshold = Math.min(1, Math.max(0, numOr(formData.get("automodThreshold"), 0.7)));
   const automodEnabled = formData.get("automodEnabled") === "on";
   const allowedChannelIds = formData.getAll("allowedChannelIds").map(String);
   const newToken = String(formData.get("newToken") ?? "").trim();
-
-  const existing = await prisma.aiConfig.findUnique({ where: { id: "singleton" } });
 
   await prisma.aiConfig.upsert({
     where: { id: "singleton" },
@@ -49,16 +43,15 @@ export async function updateAiConfig(formData: FormData) {
     },
   });
 
-  void existing;
   revalidatePath("/ai-module");
 }
 
 export async function upsertPricingTier(formData: FormData) {
   const id = String(formData.get("id") ?? "");
-  const minChars = Number(formData.get("minChars"));
+  const minChars = Math.max(0, Math.floor(numOr(formData.get("minChars"), 0)));
   const maxCharsRaw = String(formData.get("maxChars") ?? "");
-  const maxChars = maxCharsRaw === "" ? null : Number(maxCharsRaw);
-  const creditCost = Number(formData.get("creditCost"));
+  const maxChars = maxCharsRaw === "" ? null : Math.max(0, Math.floor(numOr(maxCharsRaw, 0)));
+  const creditCost = Math.max(0, Math.floor(numOr(formData.get("creditCost"), 0)));
 
   if (id) {
     await prisma.aiPricingTier.update({ where: { id }, data: { minChars, maxChars, creditCost } });

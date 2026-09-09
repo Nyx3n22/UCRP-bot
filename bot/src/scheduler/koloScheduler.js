@@ -36,7 +36,7 @@ async function checkExpiredInvites(client) {
     await leader
       ?.send(
         `⌛ Zaproszenie do koła **${invite.kolo.name}** dla <@${invite.userId}> wygasło (72h bez odpowiedzi). ` +
-          "Zaproś kogoś innego przez kanał ⚒️zarządzaj-kołem (jeśli koło już aktywne) - jeśli koło jeszcze nie zostało zatwierdzone, skontaktuj się z supportem."
+          "Zaproś kogoś innego komendą `/kolo zaprosz` (działa i przed, i po zatwierdzeniu koła)."
       )
       .catch(() => null);
   }

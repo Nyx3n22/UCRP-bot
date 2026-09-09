@@ -5,7 +5,8 @@ import { revalidatePath } from "next/cache";
 
 export async function createResource(formData: FormData) {
   const title = String(formData.get("title") ?? "").trim();
-  const totalCopies = Number(formData.get("totalCopies") ?? 1);
+  const totalCopiesRaw = Number(formData.get("totalCopies") ?? 1);
+  const totalCopies = Number.isFinite(totalCopiesRaw) ? Math.max(1, Math.floor(totalCopiesRaw)) : 1;
   if (!title) return;
 
   await prisma.libraryResource.create({ data: { title, totalCopies } });

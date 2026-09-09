@@ -45,6 +45,7 @@ module.exports = {
         .setDescription("Rozpoczyna badanie (z listy admina - od razu, lub własny temat - do akceptacji)")
         .addStringOption((o) => o.setName("temat").setDescription("Temat badania").setRequired(true).setAutocomplete(true))
     )
+    .addSubcommand((s) => s.setName("opusc").setDescription("Opuszcza koło (nie dotyczy lidera)"))
     .addSubcommandGroup((g) =>
       g
         .setName("badania")
@@ -72,25 +73,51 @@ module.exports = {
     ),
 
   async execute(interaction) {
-    const group = interaction.options.getSubcommandGroup(false);
-    const sub = interaction.options.getSubcommand();
+    try {
+      const group = interaction.options.getSubcommandGroup(false);
+      const sub = interaction.options.getSubcommand();
 
-    if (group === "badania") return koloService.cmdManageResearch(interaction);
+      if (group === "badania") return koloService.cmdManageResearch(interaction);
 
-    if (sub === "zaprosz") return koloService.cmdInvite(interaction);
-    if (sub === "wyrzuc") return koloService.cmdKick(interaction);
-    if (sub === "prosba") return koloService.cmdChangeRequest(interaction);
-    if (sub === "badanie-rozpocznij") return koloService.cmdStartResearch(interaction);
+      if (sub === "zaprosz") return koloService.cmdInvite(interaction);
+      if (sub === "wyrzuc") return koloService.cmdKick(interaction);
+      if (sub === "prosba") return koloService.cmdChangeRequest(interaction);
+      if (sub === "badanie-rozpocznij") return koloService.cmdStartResearch(interaction);
+      if (sub === "opusc") return koloService.cmdLeave(interaction);
+    } catch (err) {
+      console.error("[kolo] Błąd komendy:", err);
+      const payload = { content: "❌ Błąd serwera. Spróbuj ponownie.", ephemeral: true };
+      // Metody cmd* robią deferReply na wejściu, więc zwykle odpowiadamy
+      // edycją; reply tylko gdyby błąd padł przed deferem.
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply(payload).catch(() => null);
+      } else {
+        await interaction.reply(payload).catch(() => null);
+      }
+    }
   },
 
   async autocomplete(interaction) {
+    try {
+      return await this._autocompleteInner(interaction);
+    } catch (err) {
+      console.error("[kolo] Błąd autocomplete:", err.message);
+      return interaction.respond([]).catch(() => null);
+    }
+  },
+
+  async _autocompleteInner(interaction) {
     const focused = interaction.options.getFocused(true);
     const prisma = require("../../lib/prisma");
 
     if (focused.name === "temat") {
+      // Discord limituje name i value do 100 znaków - dłuższe tytuły
+      // pomijamy w podpowiedziach (nadal można je wpisać ręcznie).
       const topics = await prisma.researchTopic.findMany({ where: { active: true }, take: 25 });
-      const filtered = topics.filter((t) => t.title.toLowerCase().includes(focused.value.toLowerCase()));
-      return interaction.respond(filtered.map((t) => ({ name: t.title, value: t.title })));
+      const filtered = topics.filter(
+        (t) => t.title.length <= 100 && t.title.toLowerCase().includes(focused.value.toLowerCase())
+      );
+      return interaction.respond(filtered.slice(0, 25).map((t) => ({ name: t.title.slice(0, 100), value: t.title })));
     }
 
     if (focused.name === "badanie") {
@@ -103,7 +130,11 @@ module.exports = {
         take: 25,
       });
       const filtered = researches.filter((r) => r.topic.toLowerCase().includes(focused.value.toLowerCase()));
-      return interaction.respond(filtered.map((r) => ({ name: `${r.topic} (${r.status})`, value: r.topic })));
+      // Value to ID badania, nie temat - temat może przekraczać limit 100
+      // znaków i (teoretycznie) powtarzać się między badaniami.
+      return interaction.respond(
+        filtered.slice(0, 25).map((r) => ({ name: `${r.topic} (${r.status})`.slice(0, 100), value: r.id }))
+      );
     }
 
     return interaction.respond([]);

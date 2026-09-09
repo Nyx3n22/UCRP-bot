@@ -215,6 +215,11 @@ module.exports = {
     const student = await interaction.client.users.fetch(studentId).catch(() => null);
     if (!student) return interaction.reply({ content: "Nie znaleziono takiego użytkownika.", ephemeral: true });
 
+    // Grade.userId to wymagany klucz obcy do DiscordUser - student bez
+    // wiersza (np. nigdy nie pisał na kanałach AI) wysadziłby zapis (P2003).
+    const { ensureDiscordUser } = require("../../utils/ensureUser");
+    await ensureDiscordUser(student.id);
+
     await prisma.grade.create({ data: { userId: student.id, subjectId: subject.id, value, issuedById: interaction.user.id } });
     await interaction.reply(`✅ Wystawiono ocenę **${value}** z **${subject.name}** dla <@${student.id}>.`);
     await student.send(`📖 Otrzymałeś/aś ocenę **${value}** z przedmiotu **${subject.name}**.`).catch(() => null);

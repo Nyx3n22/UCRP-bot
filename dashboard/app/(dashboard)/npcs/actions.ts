@@ -9,8 +9,12 @@ export async function createNpc(formData: FormData) {
   const avatarUrl = String(formData.get("avatarUrl") ?? "").trim();
   if (!name || !personality) return;
 
-  await prisma.npcCharacter.create({
-    data: { name, personality, avatarUrl: avatarUrl || null },
+  // Upsert po @unique(name) - ponowny zapis tej samej postaci crashował
+  // formularz błędem P2002.
+  await prisma.npcCharacter.upsert({
+    where: { name },
+    update: { personality, avatarUrl: avatarUrl || null },
+    create: { name, personality, avatarUrl: avatarUrl || null },
   });
   revalidatePath("/npcs");
 }

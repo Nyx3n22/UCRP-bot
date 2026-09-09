@@ -24,6 +24,7 @@ const { generateAiReply } = require("./aiGatewayService");
 const { logError, logAction } = require("../utils/logger");
 const { computeInitialValidUntil } = require("../utils/legitymacja");
 const { generateBanner } = require("../utils/banner");
+const { ensureDiscordUser } = require("../utils/ensureUser");
 
 const CODE_CHARSET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -293,9 +294,14 @@ class VerificationServiceV2 {
   }
 
   /**
-   * Krok 2: Przycisk pod captchą — otwiera modal na wpisanie kodu
+   * Krok 2: Przycisk pod captchą — otwiera modal na wpisanie kodu.
+   * Długość kodu bierzemy z konfiguracji (Dashboard pozwala ją zmienić),
+   * a nie na sztywno 6 - inaczej przy innej długości modal odrzucałby
+   * poprawny kod zanim w ogóle trafiłby do handlera.
    */
-  buildCaptchaModal() {
+  async buildCaptchaModal() {
+    const config = await this._getConfig();
+    const len = Math.min(12, Math.max(4, config.captchaCodeLength || 6));
     return new ModalBuilder()
       .setCustomId("verify_captcha_modal_v2")
       .setTitle("Weryfikacja IC — Krok 2/3")
@@ -303,11 +309,11 @@ class VerificationServiceV2 {
         new ActionRowBuilder().addComponents(
           new TextInputBuilder()
             .setCustomId("kod")
-            .setLabel("Kod z obrazka (6 znaków)")
+            .setLabel(`Kod z obrazka (${len} znaków)`)
             .setStyle(TextInputStyle.Short)
             .setRequired(true)
-            .setMinLength(6)
-            .setMaxLength(6)
+            .setMinLength(len)
+            .setMaxLength(len)
         )
       );
   }
@@ -336,11 +342,22 @@ class VerificationServiceV2 {
 
       const kod = interaction.fields.getTextInputValue("kod").trim().toUpperCase();
       if (kod !== pending.captchaCode) {
-        await logError("verificationService", "WRONG_CAPTCHA", `Błędny kod: ${kod} (oczekiwano: ${pending.captchaCode})`, {
+        // Licznik prób był tylko ODCZYTYWANY w komunikacie, ale nigdy nie
+        // inkrementowany - każdy widział wieczne "próba 1/3" i mógł
+        // zgadywać w nieskończoność. Po 3. błędzie sesja przepada.
+        pending.captchaAttempts = (pending.captchaAttempts || 0) + 1;
+        await logError("verificationService", "WRONG_CAPTCHA", `Błędny kod: ${kod} (próba ${pending.captchaAttempts}/3)`, {
           userId: interaction.user.id,
         });
+        if (pending.captchaAttempts >= 3) {
+          this._pendingVerifications.delete(interaction.user.id);
+          return interaction.reply({
+            content: "❌ 3 błędne próby. Sesja wygasła ze względów bezpieczeństwa - zacznij weryfikację od nowa.",
+            ephemeral: true,
+          });
+        }
         return interaction.reply({
-          content: `❌ Błędny kod (próba ${(pending.captchaAttempts || 0) + 1}/3). Spróbuj ponownie.`,
+          content: `❌ Błędny kod (próba ${pending.captchaAttempts}/3). Spróbuj ponownie.`,
           ephemeral: true,
         });
       }
@@ -443,8 +460,8 @@ class VerificationServiceV2 {
       }
 
       // Utwórz VerificationAttempt w bazie (czeka na manualny przegląd)
+      // (PESEL losujemy dopiero przy tworzeniu postaci, z retry na kolizje)
       const genderIC = this._inferGenderFromName(pending.firstNameIC);
-      const pesel = generatePesel(pending.birthDate, genderIC);
 
       const attempt = await prisma.verificationAttempt.upsert({
         where: { userId: interaction.user.id },
@@ -486,22 +503,35 @@ class VerificationServiceV2 {
         },
       });
 
-      if (!config.manualReviewRequired && aiScore > 0.7) {
-        // Auto-approve jeśli nie wymaga recenzji i AI score wysoki
-        await this._autoApproveVerification(interaction.user.id, genderIC, pesel, interaction.guild);
+      // Ścieżka auto-approve TYLKO gdy recenzja wyłączona I score wysoki.
+      // UWAGA: stara wersja miała tu dziurę - przy wyłączonej recenzji
+      // i niskim score żaden branch się nie wykonywał: użytkownik wisiał
+      // na "⏳ Analizuję..." bez odpowiedzi, a próba miała w bazie status
+      // VERIFIED mimo że nikt jej nie zatwierdził. Niski score zawsze
+      // eskalujemy do kolejki manualnej (bezpieczny domyślny).
+      const needsManual = config.manualReviewRequired || aiScore <= 0.7;
+      if (!needsManual) {
+        await this._autoApproveVerification(interaction.user.id, genderIC, interaction.guild);
         return interaction.editReply(
           `✅ **Weryfikacja zakończona!** Witaj, **${pending.firstNameIC} ${pending.lastNameIC}**!\n` +
           `Masz dostęp do serwera. Pamiętaj o usunięciu kodu z opisu profilu Roblox.`
         );
-      } else if (config.manualReviewRequired) {
-        // Wyślij do przeglądu manualnego
-        await this._sendToManualReview(interaction.guild, attempt, pending, aiScore, aiFlags);
-        return interaction.editReply(
-          `✅ Twoja weryfikacja przeszła wstępną ocenę!\n\n` +
-          `**Status:** Oczekiwanie na przegląd manualny (może zająć kilka godzin)\n` +
-          `Otrzymasz wiadomość na Discordzie, gdy będzie gotowe. Dziękuję za cierpliwość!`
-        );
       }
+
+      if (!config.manualReviewRequired) {
+        // Recenzja formalnie wyłączona, ale score niski - korygujemy
+        // status próby (upsert wyżej ustawił VERIFIED) na kolejkowy.
+        await prisma.verificationAttempt.update({
+          where: { id: attempt.id },
+          data: { status: "PENDING_MANUAL_REVIEW" },
+        });
+      }
+      await this._sendToManualReview(interaction.guild, attempt, pending, aiScore, aiFlags);
+      return interaction.editReply(
+        `✅ Twoja weryfikacja przeszła wstępną ocenę!\n\n` +
+        `**Status:** Oczekiwanie na przegląd manualny (może zająć kilka godzin)\n` +
+        `Otrzymasz wiadomość na Discordzie, gdy będzie gotowe. Dziękuję za cierpliwość!`
+      );
     } catch (err) {
       await logError("verificationService", "ROBLOX_CHECK_ERROR", err.message, {
         userId: interaction.user.id,
@@ -577,7 +607,9 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
       );
 
     if (aiFlags.length > 0) {
-      embed.addField("🚩 Flagi AI", aiFlags.join(", "));
+      // UWAGA: w discord.js v14 nie ma już .addField (pojedynczego) -
+      // stara wersja crashowała cały handler, gdy tylko AI zwróciło flagi.
+      embed.addFields({ name: "🚩 Flagi AI", value: aiFlags.join(", ").slice(0, 1000) });
     }
 
     const acceptBtn = new ButtonBuilder()
@@ -602,9 +634,31 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
   }
 
   /**
+   * Tworzy Character z losowanym PESEL-em. PESEL jest unique w bazie, a
+   * generator pseudolosowy - przy kolizji (P2002) losujemy nowy zamiast
+   * crashować decyzję moderatora / auto-approve.
+   */
+  async _createCharacterWithPeselRetry(data, birthDate, genderIC, attempts = 5) {
+    let lastErr = null;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        return await prisma.character.create({ data: { ...data, pesel: generatePesel(birthDate, genderIC) } });
+      } catch (err) {
+        // Retry TYLKO przy kolizji PESEL-a. P2002 na innym polu (np. userId
+        // przy podwójnym kliku dwóch moderatorów) to prawdziwy błąd -
+        // ponawianie nic by nie dało.
+        const targetsPesel = err?.code === "P2002" && (err?.meta?.target ?? []).includes("pesel");
+        if (!targetsPesel) throw err;
+        lastErr = err;
+      }
+    }
+    throw lastErr;
+  }
+
+  /**
    * Auto-zatwierdzenie weryfikacji (gdy nie wymaga recenzji manualnej)
    */
-  async _autoApproveVerification(userId, genderIC, pesel, guild) {
+  async _autoApproveVerification(userId, genderIC, guild) {
     // Utwórz Character
     const pending = this._pendingVerifications.get(userId);
     await prisma.discordUser.upsert({
@@ -622,17 +676,18 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
       },
     });
 
-    await prisma.character.create({
-      data: {
+    await this._createCharacterWithPeselRetry(
+      {
         userId,
         firstNameIC: pending.firstNameIC,
         lastNameIC: pending.lastNameIC,
         birthDateIC: pending.birthDate,
         genderIC,
-        pesel,
         legitValidUntil: computeInitialValidUntil(),
       },
-    });
+      pending.birthDate,
+      genderIC
+    );
 
     // Nadaj rolę
     const verifiedRoleId = await getRoleIdForPermission("VERIFIED_ROLE");
@@ -642,7 +697,7 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
     }
 
     this._pendingVerifications.delete(userId);
-    await logAction("verification_auto_approved", userId, null, { genderIC, pesel });
+    await logAction("verification_auto_approved", userId, null, { genderIC });
   }
 
   /**
@@ -685,9 +740,13 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
         });
       }
 
+      // reviewerId w ManualReview to FK do DiscordUser - moderator klikający
+      // pierwszy raz w życiu przycisk nie ma tam wiersza, więc zapewniamy go
+      // z góry (wspólne dla wszystkich trzech decyzji poniżej).
+      await ensureDiscordUser(interaction.user.id);
+
       if (decision === "APPROVED") {
         const genderIC = this._inferGenderFromName(attempt.firstNameIC);
-        const pesel = generatePesel(attempt.birthDateIC, genderIC);
 
         await prisma.discordUser.upsert({
           where: { id: attempt.userId },
@@ -704,17 +763,18 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
           },
         });
 
-        await prisma.character.create({
-          data: {
+        await this._createCharacterWithPeselRetry(
+          {
             userId: attempt.userId,
             firstNameIC: attempt.firstNameIC,
             lastNameIC: attempt.lastNameIC,
             birthDateIC: attempt.birthDateIC,
             genderIC: attempt.genderIC,
-            pesel,
             legitValidUntil: computeInitialValidUntil(),
           },
-        });
+          attempt.birthDateIC,
+          genderIC
+        );
 
         const verifiedRoleId = await getRoleIdForPermission("VERIFIED_ROLE");
         if (verifiedRoleId) {

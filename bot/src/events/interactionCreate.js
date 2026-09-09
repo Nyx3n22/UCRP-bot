@@ -106,7 +106,7 @@ module.exports = {
       }
 
       if (interaction.isButton() && interaction.customId === "verify_captcha_button") {
-        return interaction.showModal(verificationServiceV2.buildCaptchaModal());
+        return interaction.showModal(await verificationServiceV2.buildCaptchaModal());
       }
 
       if (interaction.isModalSubmit() && interaction.customId === "verify_captcha_modal_v2") {
@@ -245,6 +245,20 @@ module.exports = {
       }
       if (interaction.isModalSubmit() && interaction.customId === "partnerstwo_modal") {
         return partnerstwoService.handleModalSubmit(interaction);
+      }
+
+      // /wiadomosc tekst|embed - modale buduje komenda z customId
+      // "wiadomosc_*_modal:<channelId>"; bez tego routingu submit modala
+      // wisiał bez odpowiedzi ("Ta interakcja się nie powiodła").
+      if (interaction.isModalSubmit() && interaction.customId.startsWith("wiadomosc_tekst_modal:")) {
+        const channelId = interaction.customId.split(":")[1];
+        const wiadomoscCommand = interaction.client.commands.get("wiadomosc");
+        return wiadomoscCommand.handleTextModalSubmit(interaction, channelId);
+      }
+      if (interaction.isModalSubmit() && interaction.customId.startsWith("wiadomosc_embed_modal:")) {
+        const channelId = interaction.customId.split(":")[1];
+        const wiadomoscCommand = interaction.client.commands.get("wiadomosc");
+        return wiadomoscCommand.handleEmbedModalSubmit(interaction, channelId);
       }
 
       if (interaction.isModalSubmit() && interaction.customId === "usos_grade_modal") {

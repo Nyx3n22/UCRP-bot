@@ -105,16 +105,41 @@ class SocialMediaService {
       TIKTOK: `🎵 Nowy TikTok — @${sub.externalHandle}`,
     }[sub.platform];
 
-    const embed = new EmbedBuilder().setTitle(platformLabel).setColor(PLATFORM_COLORS[sub.platform]);
+    const embed = new EmbedBuilder()
+      .setTitle(platformLabel ?? sub.platform)
+      .setColor(PLATFORM_COLORS[sub.platform] ?? 0x5865f2);
+
+    // Guardy ?? / warunkowe settery: connectory czasem zwracają null w
+    // polach (np. brak miniaturki), a discord.js RZUCA na undefined w
+    // setDescription/setURL/setImage. Bez tego jeden zły rekord blokowałby
+    // aktualizację lastSeenId i spamował błędem co cykl.
+    const safeUrl = (url) => (typeof url === "string" && url.startsWith("http") ? url : null);
 
     if (sub.platform === "TWITCH") {
-      embed.setDescription(latest.title).setURL(latest.url).setImage(latest.thumbnailUrl).addFields({ name: "Gra", value: latest.gameName || "—" });
+      embed.setDescription((latest.title ?? "(bez tytułu)").slice(0, 4000));
+      if (safeUrl(latest.url)) embed.setURL(latest.url);
+      if (safeUrl(latest.thumbnailUrl)) embed.setImage(latest.thumbnailUrl);
+      embed.addFields({ name: "Gra", value: (latest.gameName ?? "—").slice(0, 1000) });
     } else if (sub.platform === "YOUTUBE") {
-      embed.setDescription(latest.title).setURL(latest.url).setImage(latest.thumbnailUrl);
+      embed.setDescription((latest.title ?? "(bez tytułu)").slice(0, 4000));
+      if (safeUrl(latest.url)) embed.setURL(latest.url);
+      if (safeUrl(latest.thumbnailUrl)) embed.setImage(latest.thumbnailUrl);
     } else if (sub.platform === "INSTAGRAM") {
-      embed.setDescription(latest.caption).setURL(latest.permalink).setImage(latest.mediaUrl);
+      embed.setDescription((latest.caption ?? "(bez opisu)").slice(0, 4000));
+      if (safeUrl(latest.permalink)) embed.setURL(latest.permalink);
+      if (safeUrl(latest.mediaUrl)) embed.setImage(latest.mediaUrl);
     } else if (sub.platform === "TWITTER") {
-      embed.setDescription(latest.text).setURL(latest.url);
+      embed.setDescription((latest.text ?? "(brak treści)").slice(0, 4000));
+      if (safeUrl(latest.url)) embed.setURL(latest.url);
+    } else if (sub.platform === "TIKTOK") {
+      // Connector na razie zawsze zwraca null (brak publicznego API TikToka),
+      // ale gdyby ktoś go kiedyś zaimplementował, embed ma być kompletny.
+      embed.setDescription((latest.text ?? latest.title ?? "(nowy post)").slice(0, 4000));
+      if (safeUrl(latest.url)) embed.setURL(latest.url);
+      if (safeUrl(latest.thumbnailUrl)) embed.setImage(latest.thumbnailUrl);
+    } else {
+      embed.setDescription((latest.text ?? latest.title ?? "(nowa treść)").slice(0, 4000));
+      if (safeUrl(latest.url)) embed.setURL(latest.url);
     }
 
     return embed;
