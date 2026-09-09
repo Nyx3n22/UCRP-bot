@@ -23,6 +23,37 @@ export default function ApplicationsReviewPage() {
   const [applications, setApplications] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'pending' | 'accepted' | 'rejected'>('pending');
+  const [actingId, setActingId] = useState<string | null>(null);
+
+  const decide = async (app: Application, decision: 'ACCEPTED' | 'REJECTED') => {
+    const feedback =
+      decision === 'REJECTED'
+        ? window.prompt('Powód odrzucenia (opcjonalnie, trafi do kandydata na DM):') ?? ''
+        : '';
+    const ok = window.confirm(
+      decision === 'ACCEPTED'
+        ? `Zaakceptować podanie ${app.type} od <@${app.userId}>?`
+        : `Odrzucić podanie ${app.type} od <@${app.userId}>?`
+    );
+    if (!ok) return;
+    try {
+      setActingId(app.id);
+      const res = await fetch('/api/applications', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ applicationId: app.id, decision, feedback }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Błąd decyzji');
+      // Odśwież listę (przy filtrze 'pending' pozycja sama zniknie).
+      await fetchApplications();
+    } catch (error) {
+      console.error('Błąd:', error);
+      window.alert(`Nie udało się zapisać decyzji: ${error instanceof Error ? error.message : error}`);
+    } finally {
+      setActingId(null);
+    }
+  };
 
   useEffect(() => {
     fetchApplications();
@@ -144,8 +175,16 @@ export default function ApplicationsReviewPage() {
 
               {app.status === 'PENDING' && (
                 <div className="flex gap-2">
-                  <button className="flex-1 bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded font-bold">✅ Zaakceptuj</button>
-                  <button className="flex-1 bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded font-bold">❌ Odrzuć</button>
+                  <button
+                    onClick={() => decide(app, 'ACCEPTED')}
+                    disabled={actingId === app.id}
+                    className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white px-3 py-2 rounded font-bold"
+                  >✅ Zaakceptuj</button>
+                  <button
+                    onClick={() => decide(app, 'REJECTED')}
+                    disabled={actingId === app.id}
+                    className="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-3 py-2 rounded font-bold"
+                  >❌ Odrzuć</button>
                 </div>
               )}
             </div>

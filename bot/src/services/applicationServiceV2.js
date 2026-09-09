@@ -87,6 +87,11 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "sentiment": "p
         throw new Error("To podanie zostało już rozpatrzone.");
       }
 
+      // ApplicationReview.reviewerId to wymagany klucz obcy do DiscordUser -
+      // recenzent mógł nigdy nie użyć bota, więc gwarantujemy wiersz.
+      const { ensureDiscordUser } = require("../utils/ensureUser");
+      await ensureDiscordUser(reviewerId);
+
       // Utwórz ApplicationReview
       const review = await prisma.applicationReview.create({
         data: {

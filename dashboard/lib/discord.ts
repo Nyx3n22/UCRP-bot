@@ -8,6 +8,16 @@
 
 const DISCORD_API = "https://discord.com/api/v10";
 
+/**
+ * Nagłówek X-Audit-Log-Reason musi być w Latin-1 / URL-encoded - polskie
+ * znaki (ż, ó, ł...) wprost wysłane crashują fetch ("String contains non
+ * ISO-8859-1 code point") albo kończą 400 od Discorda. Discord dekoduje
+ * %XX po swojej stronie, więc encodeURIComponent jest tu poprawne.
+ */
+function auditReason(reason: string): string {
+  return encodeURIComponent((reason || "Dashboard").slice(0, 200));
+}
+
 export async function fetchGuildMemberRoleIds(discordUserId: string): Promise<string[]> {
   const { roleIds } = await fetchGuildMemberRoleIdsDebug(discordUserId);
   return roleIds;
@@ -56,19 +66,21 @@ export type DiscordChannel = { id: string; name: string; type: number; parent_id
 
 const TEXT_CHANNEL_TYPES = new Set([0, 5]); // 0 = text, 5 = announcement
 const VOICE_CHANNEL_TYPES = new Set([2]); // 2 = voice
+const CATEGORY_TYPE = 4; // 4 = category
 
 /** Lista kanałów na serwerze - do dropdownów zamiast ręcznego wklejania ID */
-export async function fetchGuildChannels(): Promise<{ text: DiscordChannel[]; voice: DiscordChannel[] }> {
+export async function fetchGuildChannels(): Promise<{ text: DiscordChannel[]; voice: DiscordChannel[]; categories: DiscordChannel[] }> {
   const res = await fetch(`${DISCORD_API}/guilds/${process.env.GUILD_ID}/channels`, {
     headers: { Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}` },
     cache: "no-store",
   });
-  if (!res.ok) return { text: [], voice: [] };
+  if (!res.ok) return { text: [], voice: [], categories: [] };
 
   const channels: DiscordChannel[] = await res.json();
   return {
     text: channels.filter((c) => TEXT_CHANNEL_TYPES.has(c.type)),
     voice: channels.filter((c) => VOICE_CHANNEL_TYPES.has(c.type)),
+    categories: channels.filter((c) => c.type === CATEGORY_TYPE),
   };
 }
 
@@ -100,7 +112,7 @@ export async function banGuildMember(userId: string, reason: string): Promise<{ 
     headers: {
       Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}`,
       "Content-Type": "application/json",
-      "X-Audit-Log-Reason": reason.slice(0, 500),
+      "X-Audit-Log-Reason": auditReason(reason),
     },
     body: JSON.stringify({}),
   });
@@ -114,11 +126,39 @@ export async function kickGuildMember(userId: string, reason: string): Promise<{
     method: "DELETE",
     headers: {
       Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}`,
-      "X-Audit-Log-Reason": reason.slice(0, 500),
+      "X-Audit-Log-Reason": auditReason(reason),
     },
   });
   if (!res.ok) return { ok: false, error: await res.text().catch(() => res.statusText) };
   return { ok: true };
+}
+
+/** Nadaje rolę użytkownikowi na serwerze (np. po akceptacji podania z Dashboardu) */
+export async function addGuildMemberRole(userId: string, roleId: string, reason: string): Promise<{ ok: boolean; error?: string }> {
+  const res = await fetch(`${DISCORD_API}/guilds/${process.env.GUILD_ID}/members/${userId}/roles/${roleId}`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}`,
+      "X-Audit-Log-Reason": auditReason(reason),
+    },
+  });
+  if (!res.ok) return { ok: false, error: await res.text().catch(() => res.statusText) };
+  return { ok: true };
+}
+
+/** Wysyła DM do użytkownika (otwiera kanał DM bot→user, potem wysyła treść) */
+export async function sendUserDm(userId: string, content: string): Promise<{ ok: boolean; error?: string }> {
+  const dmRes = await fetch(`${DISCORD_API}/users/@me/channels`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ recipient_id: userId }),
+  });
+  if (!dmRes.ok) return { ok: false, error: "Nie udało się otworzyć DM (użytkownik ma zablokowane wiadomości?)" };
+  const dm = await dmRes.json();
+  return sendChannelMessage(dm.id, { content });
 }
 
 /** Wycisza użytkownika (Discord timeout) na dany czas w minutach */
@@ -133,7 +173,7 @@ export async function timeoutGuildMember(
     headers: {
       Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}`,
       "Content-Type": "application/json",
-      "X-Audit-Log-Reason": reason.slice(0, 500),
+      "X-Audit-Log-Reason": auditReason(reason),
     },
     body: JSON.stringify({ communication_disabled_until: until }),
   });

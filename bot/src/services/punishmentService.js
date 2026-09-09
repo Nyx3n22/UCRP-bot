@@ -11,6 +11,10 @@ const STUDENT_PERMISSION_KEY = "STUDENT_ROLE"; // binding w RoleBinding wskazujÄ
 
 class PunishmentService {
   async issue(guild, { targetUserId, issuedById, reason, severity, expiresAt }) {
+    // Punishment.userId to wymagany klucz obcy do DiscordUser.
+    const { ensureDiscordUser } = require("../utils/ensureUser");
+    await ensureDiscordUser(targetUserId);
+
     const punishment = await prisma.punishment.create({
       data: { userId: targetUserId, issuedById, reason, severity, expiresAt },
     });

@@ -76,6 +76,11 @@ class TicketService {
       ],
     });
 
+    // Ticket.ownerId to wymagany klucz obcy do DiscordUser - bez wiersza
+    // zapis kończy się błędem P2003 (otwierający mógł nigdy nie użyć bota).
+    const { ensureDiscordUser } = require("../utils/ensureUser");
+    await ensureDiscordUser(member.id);
+
     const ticket = await prisma.ticket.create({
       data: {
         ownerId: member.id,

@@ -15,7 +15,8 @@ export default async function ReactionRolesPage() {
     fetchGuildChannels(),
   ]);
 
-  const roleNameById = new Map(roles.map((r) => [r.id, r.name]));
+  // Record, nie Map - Map nie przechodzi serializacji Server -> Client Component.
+  const roleNameById: Record<string, string> = Object.fromEntries(roles.map((r) => [r.id, r.name]));
 
   return (
     <div>
@@ -51,7 +52,7 @@ export default async function ReactionRolesPage() {
               </form>
             </div>
 
-            <form action={publishGroup} className="flex items-center gap-2 mb-4">
+            <form action={async (formData) => { await publishGroup(formData); }} className="flex items-center gap-2 mb-4">
               <input type="hidden" name="groupId" value={g.id} />
               <select name="channelId" required className="text-sm">
                 <option value="">Wybierz kanał do publikacji...</option>

@@ -32,7 +32,7 @@ export default async function ModerationPage() {
           </button>
         </form>
 
-        <form action={kickUser} className="card p-5 flex flex-col gap-3">
+        <form action={async (formData) => { await kickUser(formData); }} className="card p-5 flex flex-col gap-3">
           <h2 className="font-display text-lg">👢 Kick</h2>
           <input type="text" name="userId" placeholder="ID / wzmianka użytkownika" required />
           <input type="text" name="reason" placeholder="Powód" required />
@@ -41,7 +41,7 @@ export default async function ModerationPage() {
           </button>
         </form>
 
-        <form action={timeoutUser} className="card p-5 flex flex-col gap-3">
+        <form action={async (formData) => { await timeoutUser(formData); }} className="card p-5 flex flex-col gap-3">
           <h2 className="font-display text-lg">🔇 Wycisz (timeout)</h2>
           <input type="text" name="userId" placeholder="ID / wzmianka użytkownika" required />
           <input type="number" name="minutes" placeholder="Minuty" min={1} required />
@@ -51,7 +51,7 @@ export default async function ModerationPage() {
           </button>
         </form>
 
-        <form action={issuePunishment} className="card p-5 flex flex-col gap-3">
+        <form action={async (formData) => { await issuePunishment(formData); }} className="card p-5 flex flex-col gap-3">
           <h2 className="font-display text-lg">⚖️ Kara dyscyplinarna IC</h2>
           <input type="text" name="userId" placeholder="ID / wzmianka użytkownika" required />
           <select name="severity" required>

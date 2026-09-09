@@ -27,4 +27,5 @@ export const PERMISSION_KEYS = [
   { key: "VERIFIED_ROLE", label: "Rola nadawana po zakończeniu weryfikacji" },
   { key: "RECTORATE_ACCESS", label: "Rektorat - audyt całej uczelni (/usos audyt)" },
   { key: "PARTNERSHIP_MANAGER", label: "Odpowiedzialny za partnerstwa" },
+  { key: "STUDY_YEAR_ROLE", label: "Rola roku studiów (uzupełnij też pole Rok studiów)" },
 ] as const;

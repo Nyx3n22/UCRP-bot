@@ -1,6 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
 const thesisService = require("../../services/thesisService");
-const { hasPermission } = require("../../config/roles");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -47,9 +46,8 @@ module.exports = {
       }
 
       if (sub === "status") {
-        if (!(await hasPermission(interaction.member, "MANAGE_GRADES"))) {
-          // promotor bez roli kadry i tak jest weryfikowany w serwisie (musi być przypisanym promotorem)
-        }
+        // Uprawnienia weryfikuje thesisService.updateStatus (tylko przypisany
+        // promotor) - tu nic nie blokujemy.
         const id = interaction.options.getString("id");
         const nowyStatus = interaction.options.getString("nowy_status");
         await thesisService.updateStatus(id, nowyStatus, interaction.user.id);

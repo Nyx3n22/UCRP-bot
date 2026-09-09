@@ -1,26 +1,37 @@
 import { prisma } from "@/lib/prisma";
-import { fetchGuildChannels } from "@/lib/discord";
+import { fetchGuildChannels, fetchGuildRoles } from "@/lib/discord";
 import { upsertChannelBinding, deleteChannelBinding } from "./actions";
 
-const SINGLE_CHANNEL_KEYS = [
+const SINGLE_TEXT_KEYS = [
   "LOG_MOD", "LOG_AI", "LOG_PUNISHMENTS", "APPLICATIONS_STUDENT", "APPLICATIONS_WYKLADOWCA",
   "APPLICATIONS_ADMINISTRACJA", "VERIFICATION", "VERIFICATION_REVIEW", "ANNOUNCEMENTS", "EXAM_RESULTS", "TICKET_TRANSCRIPTS",
-  "TICKET_CATEGORY_SUPPORT", "TICKET_CATEGORY_REPORT", "TICKET_CATEGORY_DEANERY",
   "KOLA_NAUKOWE", "KOLA_REVIEW", "LEVEL_UP",
-  "TICKET_PANEL", "PARTNERSTWO_PANEL", "APPLICATIONS_REVIEW", "STYPENDIUM", "TICKET_CATEGORY_PARTNERSTWO",
+  "TICKET_PANEL", "PARTNERSTWO_PANEL", "APPLICATIONS_REVIEW", "STYPENDIUM",
 ];
 
-const MULTI_CHANNEL_KEYS = ["AUTOROLE_JSON"];
+// Kategorie Discorda (typ 4), nie kanały tekstowe - osobna pula, bo bot
+// tworzy w nich tickety i przekazanie ID kanału tekstowego by failowało.
+const SINGLE_CATEGORY_KEYS = [
+  "TICKET_CATEGORY_SUPPORT", "TICKET_CATEGORY_REPORT", "TICKET_CATEGORY_DEANERY", "TICKET_CATEGORY_PARTNERSTWO",
+];
+
+// LECTURE_HALLS_JSON = lista ID kanałów GŁOSOWYCH (attendanceService),
+// AUTOROLE_JSON = lista ID RÓL (guildMemberAdd) - nie kanałów!
+const MULTI_VOICE_KEYS = ["LECTURE_HALLS_JSON"];
+const MULTI_ROLE_KEYS = ["AUTOROLE_JSON"];
 
 export default async function ChannelsPage() {
-  const [bindings, channels] = await Promise.all([
+  const [bindings, channels, roles] = await Promise.all([
     prisma.channelBinding.findMany({ orderBy: { key: "asc" } }),
     fetchGuildChannels(),
+    fetchGuildRoles(),
   ]);
 
   const bindingByKey = new Map(bindings.map((b: any) => [b.key, b.channelId]));
   const textNameById = new Map(channels.text.map((c: any) => [c.id, c.name]));
   const voiceNameById = new Map(channels.voice.map((c: any) => [c.id, c.name]));
+  const categoryNameById = new Map(channels.categories.map((c: any) => [c.id, c.name]));
+  const roleNameById = new Map(roles.map((r: any) => [r.id, r.name]));
 
   return (
     <div>
@@ -39,7 +50,7 @@ export default async function ChannelsPage() {
 
       <h2 className="font-display text-lg mb-4">Kanały tekstowe (pojedyncze)</h2>
       <div className="flex flex-col gap-3 mb-10 max-w-2xl">
-        {SINGLE_CHANNEL_KEYS.map((key) => (
+        {SINGLE_TEXT_KEYS.map((key) => (
           <form key={key} action={upsertChannelBinding} className="card p-4 flex items-center gap-3 justify-between">
             <div>
               <p className="font-mono text-xs text-brass">{key}</p>
@@ -61,9 +72,33 @@ export default async function ChannelsPage() {
         ))}
       </div>
 
-      <h2 className="font-display text-lg mb-4">Listy kanałów (wielokrotny wybór)</h2>
+      <h2 className="font-display text-lg mb-4">Kategorie (do ticketów)</h2>
+      <div className="flex flex-col gap-3 mb-10 max-w-2xl">
+        {SINGLE_CATEGORY_KEYS.map((key) => (
+          <form key={key} action={upsertChannelBinding} className="card p-4 flex items-center gap-3 justify-between">
+            <div>
+              <p className="font-mono text-xs text-brass">{key}</p>
+              {!!bindingByKey.get(key) && (
+                <p className="text-xs text-parchment/40">obecnie: {categoryNameById.get(bindingByKey.get(key)!) ?? bindingByKey.get(key)}</p>
+              )}
+            </div>
+            <input type="hidden" name="key" value={key} />
+            <div className="flex items-center gap-2">
+              <select name="channelId" defaultValue={(bindingByKey.get(key) as string) ?? ""} className="w-56">
+                <option value="">— wybierz kategorię —</option>
+                {channels.categories.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+              <button type="submit" className="btn-primary text-xs">Zapisz</button>
+            </div>
+          </form>
+        ))}
+      </div>
+
+      <h2 className="font-display text-lg mb-4">Sale wykładowe (kanały głosowe, wielokrotny wybór)</h2>
       <div className="flex flex-col gap-4 mb-10 max-w-2xl">
-        {MULTI_CHANNEL_KEYS.map((key) => {
+        {MULTI_VOICE_KEYS.map((key) => {
           const currentIds = (() => {
             try {
               return JSON.parse((bindingByKey.get(key) as string) ?? "[]") as string[];
@@ -71,8 +106,6 @@ export default async function ChannelsPage() {
               return [];
             }
           })();
-          const pool = key === "LECTURE_HALLS_JSON" ? channels.voice : channels.text;
-          const nameMap = key === "LECTURE_HALLS_JSON" ? voiceNameById : textNameById;
 
           return (
             <form key={key} action={upsertChannelBinding} className="card p-4">
@@ -81,11 +114,11 @@ export default async function ChannelsPage() {
               <p className="font-mono text-xs text-brass mb-2">{key}</p>
               {currentIds.length > 0 && (
                 <p className="text-xs text-parchment/40 mb-2">
-                  obecnie: {currentIds.map((id) => nameMap.get(id) ?? id).join(", ")}
+                  obecnie: {currentIds.map((id) => voiceNameById.get(id) ?? id).join(", ")}
                 </p>
               )}
               <div className="grid grid-cols-3 gap-2 mb-3 max-h-40 overflow-y-auto">
-                {pool.map((c) => (
+                {channels.voice.map((c) => (
                   <label key={c.id} className="flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"
@@ -95,6 +128,48 @@ export default async function ChannelsPage() {
                       className="w-4 h-4"
                     />
                     {c.name}
+                  </label>
+                ))}
+              </div>
+              <button type="submit" className="btn-primary text-xs">Zapisz listę</button>
+            </form>
+          );
+        })}
+      </div>
+
+      <h2 className="font-display text-lg mb-4">Autorole (role, wielokrotny wybór)</h2>
+      <div className="flex flex-col gap-4 mb-10 max-w-2xl">
+        {MULTI_ROLE_KEYS.map((key) => {
+          const currentIds = (() => {
+            try {
+              return JSON.parse((bindingByKey.get(key) as string) ?? "[]") as string[];
+            } catch {
+              return [];
+            }
+          })();
+
+          return (
+            <form key={key} action={upsertChannelBinding} className="card p-4">
+              <input type="hidden" name="key" value={key} />
+              <input type="hidden" name="isJsonList" value="true" />
+              <p className="font-mono text-xs text-brass mb-2">{key}</p>
+              <p className="text-xs text-parchment/40 mb-2">Role nadawane automatycznie nowym członkom serwera.</p>
+              {currentIds.length > 0 && (
+                <p className="text-xs text-parchment/40 mb-2">
+                  obecnie: {currentIds.map((id) => roleNameById.get(id) ?? id).join(", ")}
+                </p>
+              )}
+              <div className="grid grid-cols-3 gap-2 mb-3 max-h-40 overflow-y-auto">
+                {roles.map((r) => (
+                  <label key={r.id} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      name="channelIds"
+                      value={r.id}
+                      defaultChecked={currentIds.includes(r.id)}
+                      className="w-4 h-4"
+                    />
+                    {r.name}
                   </label>
                 ))}
               </div>

@@ -5,6 +5,23 @@
 require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
+
+// Fail-fast: bez tych zmiennych bot i tak nie wystartuje, a błędy byłyby
+// kryptyczne (np. "Expected token to be set" z głębi REST).
+for (const key of ["DISCORD_TOKEN", "CLIENT_ID", "GUILD_ID", "DATABASE_URL", "ENCRYPTION_KEY"]) {
+  if (!process.env[key]) {
+    console.error(`❌ Brak wymaganej zmiennej środowiskowej: ${key}. Sprawdź .env / ustawienia hostingu.`);
+    process.exit(1);
+  }
+}
+
+// Globalne łapanie błędów - bez tego bot potrafił paść po cichu albo
+// wisieć w połowie zainicjalizowany.
+process.on("unhandledRejection", (err) => console.error("❌ UnhandledRejection:", err));
+process.on("uncaughtException", (err) => {
+  console.error("❌ UncaughtException:", err);
+  process.exit(1);
+});
 const { Client, GatewayIntentBits, Partials, Collection, REST, Routes } = require("discord.js");
 const { startSocialMediaScheduler } = require("./scheduler/socialMediaScheduler");
 const { startKoloScheduler } = require("./scheduler/koloScheduler");
@@ -36,9 +53,20 @@ function loadCommands() {
 
   for (const category of categories) {
     const categoryPath = path.join(commandsPath, category);
+    if (!fs.statSync(categoryPath).isDirectory()) continue;
     const files = fs.readdirSync(categoryPath).filter((f) => f.endsWith(".js"));
     for (const file of files) {
       const command = require(path.join(categoryPath, file));
+      if (!command?.data?.name || typeof command.execute !== "function") {
+        console.warn(`⚠️ Pomijam ${category}/${file}: brak data.name lub execute().`);
+        continue;
+      }
+      // Komendy zakładają kontekst serwera (interaction.guild/member) - w DM
+      // crashowałyby na null. Blokujemy centralnie, z opt-out przez
+      // `allowDM = true` w module komendy.
+      if (!command.allowDM && typeof command.data.setDMPermission === "function") {
+        command.data.setDMPermission(false);
+      }
       client.commands.set(command.data.name, command);
       commandData.push(command.data.toJSON());
     }
@@ -77,17 +105,23 @@ async function registerSlashCommands(commandData) {
 }
 
 (async () => {
-  console.log(`🔧 Start procesu. PORT z środowiska: ${process.env.PORT ?? "(brak - użyję domyślnego 3001)"}`);
-  startHealthServer(); // najpierw otwieramy port - Render skanuje go od razu po starcie procesu
-  const commandData = loadCommands();
-  loadEvents();
-  await client.login(process.env.DISCORD_TOKEN);
-  await registerSlashCommands(commandData);
-  startSocialMediaScheduler(client);
-  await koloService.ensurePanelPosted(client);
-  await applicationServiceV2.ensurePanelsPosted(client);
-  await partnerstwoService.ensurePanelPosted(client);
-  await ticketService.ensurePanelPosted(client);
-  await verificationServiceV2.ensurePanelPosted(client);
-  startKoloScheduler(client);
+  try {
+    console.log(`🔧 Start procesu. PORT z środowiska: ${process.env.PORT ?? "(brak - użyję domyślnego 3001)"}`);
+    startHealthServer(); // najpierw otwieramy port - Render skanuje go od razu po starcie procesu
+    const commandData = loadCommands();
+    loadEvents();
+    await client.login(process.env.DISCORD_TOKEN);
+    await registerSlashCommands(commandData);
+    startSocialMediaScheduler(client);
+    await koloService.ensurePanelPosted(client);
+    await applicationServiceV2.ensurePanelsPosted(client);
+    await partnerstwoService.ensurePanelPosted(client);
+    await ticketService.ensurePanelPosted(client);
+    await verificationServiceV2.ensurePanelPosted(client);
+    startKoloScheduler(client);
+    console.log("🚀 Bot gotowy.");
+  } catch (err) {
+    console.error("❌ Błąd krytyczny przy starcie bota:", err);
+    process.exit(1);
+  }
 })();

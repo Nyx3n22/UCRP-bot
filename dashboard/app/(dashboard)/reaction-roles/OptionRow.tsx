@@ -15,7 +15,7 @@ type Option = {
 
 const STYLES = ["PRIMARY", "SECONDARY", "SUCCESS", "DANGER"];
 
-export default function OptionRow({ option, roles, roleNameById }: { option: Option; roles: Role[]; roleNameById: Map<string, string> }) {
+export default function OptionRow({ option, roles, roleNameById }: { option: Option; roles: Role[]; roleNameById: Record<string, string> }) {
   const [editing, setEditing] = useState(false);
 
   if (!editing) {
@@ -23,7 +23,7 @@ export default function OptionRow({ option, roles, roleNameById }: { option: Opt
       <tr>
         <td>{option.order}</td>
         <td>{option.label}</td>
-        <td className="font-mono text-xs">{option.discordRoleIds.map((id) => roleNameById.get(id) ?? id).join(", ")}</td>
+        <td className="font-mono text-xs">{option.discordRoleIds.map((id) => roleNameById[id] ?? id).join(", ")}</td>
         <td>{option.emoji ?? "—"}</td>
         <td>{option.style}</td>
         <td className="flex gap-2">

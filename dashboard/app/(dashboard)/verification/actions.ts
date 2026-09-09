@@ -5,8 +5,12 @@ import { sendChannelMessage } from "@/lib/discord";
 import { revalidatePath } from "next/cache";
 
 export async function updateVerificationConfig(formData: FormData) {
-  const captchaCodeLength = Number(formData.get("captchaCodeLength") ?? 6);
-  const robloxCodeLength = Number(formData.get("robloxCodeLength") ?? 8);
+  // Clamp 4..12 - dokładnie ten sam zakres, który bot stosuje przy budowie
+  // modala captchy (krótszy kod byłby zgadywalny, dłuższy nie mieści się w polu).
+  const captchaRaw = Number(formData.get("captchaCodeLength") ?? 6);
+  const captchaCodeLength = Number.isFinite(captchaRaw) ? Math.min(12, Math.max(4, Math.floor(captchaRaw))) : 6;
+  const robloxRaw = Number(formData.get("robloxCodeLength") ?? 8);
+  const robloxCodeLength = Number.isFinite(robloxRaw) ? Math.min(16, Math.max(4, Math.floor(robloxRaw))) : 8;
   const panelTitle = String(formData.get("panelTitle") ?? "").trim();
   const panelDescription = String(formData.get("panelDescription") ?? "").trim();
   const robloxInstructions = String(formData.get("robloxInstructions") ?? "").trim();

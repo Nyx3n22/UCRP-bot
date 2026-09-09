@@ -84,7 +84,11 @@ module.exports = {
   async _ban(interaction) {
     const user = interaction.options.getUser("uzytkownik");
     const reason = interaction.options.getString("powod");
-    await interaction.guild.members.ban(user.id, { reason });
+    try {
+      await interaction.guild.members.ban(user.id, { reason });
+    } catch (err) {
+      return interaction.reply({ content: `❌ Nie udało się zbanować (brak uprawnień bota / wyższa rola celu?).`, ephemeral: true });
+    }
     await this._log(interaction, "BAN", user.id, { reason });
     return interaction.reply(`🔨 Zbanowano <@${user.id}>. Powód: ${reason}`);
   },
@@ -92,8 +96,13 @@ module.exports = {
   async _kick(interaction) {
     const user = interaction.options.getUser("uzytkownik");
     const reason = interaction.options.getString("powod");
-    const member = await interaction.guild.members.fetch(user.id);
-    await member.kick(reason);
+    const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+    if (!member) return interaction.reply({ content: "❌ Tego użytkownika nie ma na serwerze.", ephemeral: true });
+    try {
+      await member.kick(reason);
+    } catch (err) {
+      return interaction.reply({ content: `❌ Nie udało się wyrzucić (brak uprawnień bota / wyższa rola celu?).`, ephemeral: true });
+    }
     await this._log(interaction, "KICK", user.id, { reason });
     return interaction.reply(`👢 Wyrzucono <@${user.id}>. Powód: ${reason}`);
   },
@@ -102,8 +111,13 @@ module.exports = {
     const user = interaction.options.getUser("uzytkownik");
     const minutes = interaction.options.getInteger("minuty");
     const reason = interaction.options.getString("powod");
-    const member = await interaction.guild.members.fetch(user.id);
-    await member.timeout(minutes * 60 * 1000, reason);
+    const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+    if (!member) return interaction.reply({ content: "❌ Tego użytkownika nie ma na serwerze.", ephemeral: true });
+    try {
+      await member.timeout(minutes * 60 * 1000, reason);
+    } catch (err) {
+      return interaction.reply({ content: `❌ Nie udało się wyciszyć (brak uprawnień bota / wyższa rola celu?).`, ephemeral: true });
+    }
     await this._log(interaction, "MUTE", user.id, { reason, minutes });
     return interaction.reply(`🔇 Wyciszono <@${user.id}> na ${minutes} min. Powód: ${reason}`);
   },

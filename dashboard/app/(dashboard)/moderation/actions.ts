@@ -16,6 +16,7 @@ export async function banUser(formData: FormData) {
   if (!userId) return { error: "Nieprawidłowe ID/wzmianka użytkownika." };
 
   const result = await banGuildMember(userId, reason);
+  if (!result.ok) console.error("[moderation] banUser failed:", result.error);
   if (result.ok) {
     await prisma.actionLog.create({ data: { actorId: "DASHBOARD", action: "BAN", targetId: userId, metadata: { reason } } });
   }
@@ -29,6 +30,7 @@ export async function kickUser(formData: FormData) {
   if (!userId) return { error: "Nieprawidłowe ID/wzmianka użytkownika." };
 
   const result = await kickGuildMember(userId, reason);
+  if (!result.ok) console.error("[moderation] kickUser failed:", result.error);
   if (result.ok) {
     await prisma.actionLog.create({ data: { actorId: "DASHBOARD", action: "KICK", targetId: userId, metadata: { reason } } });
   }
@@ -43,6 +45,7 @@ export async function timeoutUser(formData: FormData) {
   if (!userId || Number.isNaN(minutes) || minutes < 1) return { error: "Nieprawidłowe dane." };
 
   const result = await timeoutGuildMember(userId, minutes, reason);
+  if (!result.ok) console.error("[moderation] timeoutUser failed:", result.error);
   if (result.ok) {
     await prisma.actionLog.create({ data: { actorId: "DASHBOARD", action: "MUTE", targetId: userId, metadata: { reason, minutes } } });
   }
