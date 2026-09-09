@@ -70,7 +70,7 @@ export default async function ModerationPage() {
 
       <h2 className="font-display text-xl mt-10 mb-3">Ostatnie akcje (Discord)</h2>
       <div className="flex flex-col gap-2">
-        {recentActions.map((a) => (
+        {recentActions.map((a: any) => (
           <div key={a.id} className="card p-3 text-sm flex justify-between">
             <span>
               <span className="text-brass font-mono text-xs mr-2">{a.action}</span>
@@ -84,7 +84,7 @@ export default async function ModerationPage() {
 
       <h2 className="font-display text-xl mt-10 mb-3">Ostatnie kary IC</h2>
       <div className="flex flex-col gap-2">
-        {recentPunishments.map((p) => (
+        {recentPunishments.map((p: any) => (
           <div key={p.id} className="card p-3 text-sm flex justify-between">
             <span>
               <span className="text-brass font-mono text-xs mr-2">{p.severity}</span>

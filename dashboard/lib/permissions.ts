@@ -18,7 +18,7 @@ export async function getUserPermissionKeys(discordUserId: string): Promise<Set<
     where: { discordRoleId: { in: roleIds } },
   });
 
-  return new Set(bindings.map((b) => b.permissionKey));
+  return new Set(bindings.map((b: any) => b.permissionKey));
 }
 
 export async function hasDashboardAccess(discordUserId: string): Promise<boolean> {

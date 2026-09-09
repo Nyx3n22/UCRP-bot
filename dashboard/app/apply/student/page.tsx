@@ -15,7 +15,7 @@ export default async function StudentApplicationPage() {
             label: "Wydział",
             type: "select",
             required: true,
-            options: faculties.map((f) => ({ value: f.name, label: f.name })),
+            options: faculties.map((f: any) => ({ value: f.name, label: f.name })),
           },
           {
             name: "rok",

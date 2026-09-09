@@ -9,15 +9,18 @@ import { getServerSession } from 'next-auth/next';
 import { authOptions } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
 import { addGuildMemberRole, sendUserDm } from '@/lib/discord';
-import { ApplicationStatus, Prisma } from '@prisma/client';
+
+// Lokalne enumy zamiast importu z @prisma/client — unikamy problemów
+// gdy prisma generate jeszcze nie wygenerował typów (np. świeży build).
+type ApplicationStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'NEEDS_CLARIFICATION';
 
 // Frontend wysyła małe litery (?status=pending) - mapujemy na enumy.
 // Bez tego filtr nigdy nie pasował i API zawsze zwracało WSZYSTKO.
 const STATUS_MAP: Record<string, ApplicationStatus | null> = {
   all: null,
-  pending: ApplicationStatus.PENDING,
-  accepted: ApplicationStatus.ACCEPTED,
-  rejected: ApplicationStatus.REJECTED,
+  pending: 'PENDING',
+  accepted: 'ACCEPTED',
+  rejected: 'REJECTED',
 };
 
 const ROLE_ON_ACCEPT: Record<string, string> = {
@@ -37,7 +40,7 @@ export async function GET(req: NextRequest) {
     const statusParam = (req.nextUrl.searchParams.get('status') || 'all').toLowerCase();
     const mapped = STATUS_MAP[statusParam];
 
-    const where: Prisma.ApplicationWhereInput = mapped ? { status: mapped } : {};
+    const where: any = mapped ? { status: mapped } : {};
 
     const applications = await prisma.application.findMany({
       where,

@@ -20,7 +20,7 @@ export default async function StypendiaPage() {
       <form action={runPayout} className="card p-5 flex flex-col gap-3 max-w-md mb-10">
         <select name="facultyId" required>
           <option value="">Wybierz wydział...</option>
-          {faculties.map((f) => (
+          {faculties.map((f: any) => (
             <option key={f.id} value={f.id}>{f.name}</option>
           ))}
         </select>
@@ -39,7 +39,7 @@ export default async function StypendiaPage() {
 
       <h2 className="font-display text-xl mb-3">Ostatnio wypłacone</h2>
       <div className="flex flex-col gap-2">
-        {recentScholarships.map((s) => (
+        {recentScholarships.map((s: any) => (
           <div key={s.id} className="card p-3 text-sm flex justify-between">
             <span className="font-mono text-xs">{s.userId} — GPA {s.gpaAtIssue.toFixed(2)} — {s.amountIC} IC</span>
             <span className="text-parchment/40 text-xs">{s.issuedAt.toLocaleDateString("pl-PL")}</span>
