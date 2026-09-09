@@ -7,7 +7,10 @@ import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissions';
-import { VerificationStatus, Prisma } from '@prisma/client';
+
+// Lokalne enumy zamiast importu z @prisma/client — unikamy problemów
+// gdy prisma generate jeszcze nie wygenerował typów (np. świeży build).
+type VerificationStatus = 'PENDING_CAPTCHA' | 'PENDING_ROBLOX' | 'PENDING_AI_REVIEW' | 'PENDING_MANUAL_REVIEW' | 'VERIFIED' | 'REJECTED' | 'EXPIRED';
 
 export async function GET(req: NextRequest) {
   try {
@@ -23,13 +26,13 @@ export async function GET(req: NextRequest) {
     const statusParam = (req.nextUrl.searchParams.get('status') || 'all').toLowerCase();
     const STATUS_MAP: Record<string, VerificationStatus | null> = {
       all: null,
-      pending: VerificationStatus.PENDING_MANUAL_REVIEW,
-      verified: VerificationStatus.VERIFIED,
-      rejected: VerificationStatus.REJECTED,
+      pending: 'PENDING_MANUAL_REVIEW',
+      verified: 'VERIFIED',
+      rejected: 'REJECTED',
     };
     const mapped = STATUS_MAP[statusParam];
 
-    const where: Prisma.VerificationAttemptWhereInput = mapped ? { status: mapped } : {};
+    const where: any = mapped ? { status: mapped } : {};
     
     const verifications = await prisma.verificationAttempt.findMany({
       where,

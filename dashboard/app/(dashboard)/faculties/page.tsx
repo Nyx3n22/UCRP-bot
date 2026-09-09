@@ -35,7 +35,7 @@ export default async function FacultiesPage() {
           </tr>
         </thead>
         <tbody>
-          {faculties.map((f) => (
+          {faculties.map((f: any) => (
             <tr key={f.id}>
               <td>{f.name}</td>
               <td>{f._count.characters}</td>

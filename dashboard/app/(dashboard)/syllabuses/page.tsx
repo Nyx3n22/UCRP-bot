@@ -9,7 +9,7 @@ export default async function SyllabusesPage({ searchParams }: { searchParams: {
   });
 
   const selectedId = searchParams.subjectId ?? subjects[0]?.id;
-  const selected = subjects.find((s) => s.id === selectedId);
+  const selected = (subjects as any[]).find((s: any) => s.id === selectedId);
 
   return (
     <div>
@@ -18,7 +18,7 @@ export default async function SyllabusesPage({ searchParams }: { searchParams: {
 
       <div className="grid grid-cols-[280px_1fr] gap-8">
         <div className="flex flex-col gap-1">
-          {subjects.map((s) => (
+          {subjects.map((s: any) => (
             <Link
               key={s.id}
               href={`/syllabuses?subjectId=${s.id}`}

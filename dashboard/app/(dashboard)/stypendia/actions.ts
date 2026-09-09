@@ -10,7 +10,7 @@ const DEFAULT_AMOUNT_IC = 1500;
 async function calculateGpa(userId: string): Promise<number | null> {
   const grades = await prisma.grade.findMany({ where: { userId } });
   if (grades.length === 0) return null;
-  return grades.reduce((sum, g) => sum + g.value, 0) / grades.length;
+  return grades.reduce((sum: number, g: any) => sum + g.value, 0) / grades.length;
 }
 
 export async function runPayout(formData: FormData) {
@@ -25,7 +25,7 @@ export async function runPayout(formData: FormData) {
   const students = await prisma.character.findMany({ where: { facultyId } });
   const results: { userId: string; gpa: number }[] = [];
 
-  for (const student of students) {
+  for (const student of students as any[]) {
     const gpa = await calculateGpa(student.userId);
     if (gpa === null || gpa < minGpa) continue;
 

@@ -50,7 +50,7 @@ export default async function ResearchTopicsPage() {
           </tr>
         </thead>
         <tbody>
-          {topics.map((t) => (
+          {topics.map((t: any) => (
             <tr key={t.id}>
               <td>{t.title}</td>
               <td>

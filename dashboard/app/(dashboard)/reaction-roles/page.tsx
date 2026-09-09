@@ -38,7 +38,7 @@ export default async function ReactionRolesPage() {
       </details>
 
       <div className="flex flex-col gap-8">
-        {groups.map((g) => (
+        {groups.map((g: any) => (
           <div key={g.id} className="card p-6">
             <div className="flex justify-between items-start mb-4">
               <div>
@@ -77,7 +77,7 @@ export default async function ReactionRolesPage() {
                 </tr>
               </thead>
               <tbody>
-                {g.options.map((o) => (
+                {g.options.map((o: any) => (
                   <OptionRow key={o.id} option={o} roles={roles} roleNameById={roleNameById} />
                 ))}
                 {g.options.length === 0 && (

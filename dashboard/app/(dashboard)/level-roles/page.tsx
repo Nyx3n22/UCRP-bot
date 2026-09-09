@@ -41,7 +41,7 @@ export default async function LevelRolesPage() {
           </tr>
         </thead>
         <tbody>
-          {rewards.map((r) => (
+          {rewards.map((r: any) => (
             <tr key={r.id}>
               <td>{r.level}</td>
               <td>{roleNameById.get(r.roleId) ?? r.roleId}</td>

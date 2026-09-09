@@ -40,7 +40,7 @@ export default async function LibraryPage() {
           </tr>
         </thead>
         <tbody>
-          {resources.map((r) => (
+          {resources.map((r: any) => (
             <tr key={r.id}>
               <td>{r.title}</td>
               <td>{r.totalCopies}</td>

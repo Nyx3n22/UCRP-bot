@@ -26,7 +26,7 @@ export default async function ApplyStatusPage() {
     <div>
       <h2 className="font-display text-xl mb-6">Moje podania</h2>
       <div className="flex flex-col gap-3">
-        {applications.map((a) => (
+        {applications.map((a: any) => (
           <div key={a.id} className="card p-4 flex justify-between items-center">
             <div>
               <p className="font-display">{a.type}</p>

@@ -32,7 +32,7 @@ export async function publishGroup(formData: FormData) {
     const chunk = group.options.slice(i, i + MAX_BUTTONS_PER_ROW);
     components.push({
       type: 1, // ActionRow
-      components: chunk.map((opt) => ({
+      components: chunk.map((opt: any) => ({
         type: 2, // Button
         style: BUTTON_STYLE_MAP[opt.style] ?? 2,
         label: opt.label,

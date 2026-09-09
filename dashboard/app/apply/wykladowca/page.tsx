@@ -15,7 +15,7 @@ export default async function WykladowcaApplicationPage() {
             label: "Wydział",
             type: "select",
             required: true,
-            options: faculties.map((f) => ({ value: f.name, label: f.name })),
+            options: faculties.map((f: any) => ({ value: f.name, label: f.name })),
           },
           { name: "przedmioty", label: "Przedmiot(y), który chcesz prowadzić", type: "text", required: true },
           { name: "doswiadczenie", label: "Doświadczenie (IC/OOC)", type: "textarea", required: true },

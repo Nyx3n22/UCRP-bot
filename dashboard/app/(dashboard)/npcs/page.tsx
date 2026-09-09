@@ -39,7 +39,7 @@ export default async function NpcsPage() {
           </tr>
         </thead>
         <tbody>
-          {npcs.map((npc) => (
+          {npcs.map((npc: any) => (
             <tr key={npc.id}>
               <td>{npc.name}</td>
               <td className="text-xs text-parchment/60 max-w-sm truncate">{npc.personality}</td>

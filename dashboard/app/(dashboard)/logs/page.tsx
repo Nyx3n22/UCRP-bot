@@ -22,7 +22,7 @@ export default async function LogsPage() {
           </tr>
         </thead>
         <tbody>
-          {logs.map((l) => (
+          {logs.map((l: any) => (
             <tr key={l.id}>
               <td className="text-xs text-parchment/50 whitespace-nowrap">{l.createdAt.toLocaleString("pl-PL")}</td>
               <td className="font-mono text-xs">{l.actorId}</td>

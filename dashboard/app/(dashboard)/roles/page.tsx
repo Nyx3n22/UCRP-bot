@@ -58,7 +58,7 @@ export default async function RolesPage() {
             <label className="text-xs text-parchment/50">Wydział (tylko dla ról kadry przypisanej do wydziału - opcjonalnie)</label>
             <select name="facultyId">
               <option value="">— brak —</option>
-              {faculties.map((f) => (
+              {faculties.map((f: any) => (
                 <option key={f.id} value={f.id}>{f.name}</option>
               ))}
             </select>
@@ -84,7 +84,7 @@ export default async function RolesPage() {
           </tr>
         </thead>
         <tbody>
-          {bindings.map((b) => (
+          {bindings.map((b: any) => (
             <tr key={b.id}>
               <td>{roleNameById.get(b.discordRoleId) ?? <span className="font-mono text-xs text-parchment/40">{b.discordRoleId} (rola usunięta?)</span>}</td>
               <td className="text-brass text-xs">{b.permissionKey}</td>
