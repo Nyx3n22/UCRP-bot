@@ -23,7 +23,16 @@ export default async function ModerationPage() {
       </p>
 
       <div className="grid md:grid-cols-2 gap-6">
-        <form action={async (formData) => { await banUser(formData); }} className="card p-5 flex flex-col gap-3">
+        {/* Server Component może przekazać do <form action> wyłącznie Server Action.
+            Sama domknięcie inline (bez "use server") crashowało serializację RSC —
+            "Functions cannot be passed directly to Client Components". */}
+        <form
+          action={async (formData: FormData) => {
+            "use server";
+            await banUser(formData);
+          }}
+          className="card p-5 flex flex-col gap-3"
+        >
           <h2 className="font-display text-lg">🔨 Ban</h2>
           <input type="text" name="userId" placeholder="ID / wzmianka użytkownika" required />
           <input type="text" name="reason" placeholder="Powód" required />
@@ -32,7 +41,13 @@ export default async function ModerationPage() {
           </button>
         </form>
 
-        <form action={async (formData) => { await kickUser(formData); }} className="card p-5 flex flex-col gap-3">
+        <form
+          action={async (formData: FormData) => {
+            "use server";
+            await kickUser(formData);
+          }}
+          className="card p-5 flex flex-col gap-3"
+        >
           <h2 className="font-display text-lg">👢 Kick</h2>
           <input type="text" name="userId" placeholder="ID / wzmianka użytkownika" required />
           <input type="text" name="reason" placeholder="Powód" required />
@@ -41,7 +56,13 @@ export default async function ModerationPage() {
           </button>
         </form>
 
-        <form action={async (formData) => { await timeoutUser(formData); }} className="card p-5 flex flex-col gap-3">
+        <form
+          action={async (formData: FormData) => {
+            "use server";
+            await timeoutUser(formData);
+          }}
+          className="card p-5 flex flex-col gap-3"
+        >
           <h2 className="font-display text-lg">🔇 Wycisz (timeout)</h2>
           <input type="text" name="userId" placeholder="ID / wzmianka użytkownika" required />
           <input type="number" name="minutes" placeholder="Minuty" min={1} required />
@@ -51,7 +72,13 @@ export default async function ModerationPage() {
           </button>
         </form>
 
-        <form action={async (formData) => { await issuePunishment(formData); }} className="card p-5 flex flex-col gap-3">
+        <form
+          action={async (formData: FormData) => {
+            "use server";
+            await issuePunishment(formData);
+          }}
+          className="card p-5 flex flex-col gap-3"
+        >
           <h2 className="font-display text-lg">⚖️ Kara dyscyplinarna IC</h2>
           <input type="text" name="userId" placeholder="ID / wzmianka użytkownika" required />
           <select name="severity" required>

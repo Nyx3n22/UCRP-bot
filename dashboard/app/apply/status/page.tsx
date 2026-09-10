@@ -3,15 +3,21 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 const STATUS_LABELS: Record<string, string> = {
-  PENDING: "W trakcie rozpatrywania",
-  ACCEPTED: "Zaakceptowane",
-  REJECTED: "Odrzucone",
+  PENDING: "⏳ W trakcie rozpatrywania",
+  ACCEPTED: "✅ Zaakceptowane",
+  REJECTED: "❌ Odrzucone",
 };
 
-const STATUS_COLORS: Record<string, string> = {
-  PENDING: "text-parchment/60",
-  ACCEPTED: "text-green-400",
-  REJECTED: "text-burgundy",
+const STATUS_BADGES: Record<string, string> = {
+  PENDING: "badge badge-amber",
+  ACCEPTED: "badge badge-green",
+  REJECTED: "badge badge-red",
+};
+
+const TYPE_LABELS: Record<string, string> = {
+  STUDENT: "🎓 Student",
+  WYKLADOWCA: "👨‍🏫 Wykładowca",
+  ADMINISTRACJA: "⚙️ Administracja",
 };
 
 export default async function ApplyStatusPage() {
@@ -24,19 +30,21 @@ export default async function ApplyStatusPage() {
 
   return (
     <div>
-      <h2 className="font-display text-xl mb-6">Moje podania</h2>
+      <h2 className="mb-6 font-display text-2xl">Moje podania</h2>
       <div className="flex flex-col gap-3">
         {applications.map((a: any) => (
-          <div key={a.id} className="card p-4 flex justify-between items-center">
-            <div>
-              <p className="font-display">{a.type}</p>
-              <p className="text-xs text-parchment/40">{a.createdAt.toLocaleDateString("pl-PL")}</p>
+          <div key={a.id} className="card flex items-center justify-between gap-4 p-5">
+            <div className="min-w-0">
+              <p className="font-display text-lg">{TYPE_LABELS[a.type] ?? a.type}</p>
+              <p className="text-xs text-parchment/40">Złożono: {a.createdAt.toLocaleDateString("pl-PL")}</p>
             </div>
-            <p className={`text-sm font-medium ${STATUS_COLORS[a.status]}`}>{STATUS_LABELS[a.status]}</p>
+            <span className={STATUS_BADGES[a.status] ?? "badge badge-gray"}>
+              {STATUS_LABELS[a.status] ?? a.status}
+            </span>
           </div>
         ))}
         {applications.length === 0 && (
-          <p className="text-parchment/40 text-sm">Nie złożyłeś jeszcze żadnego podania.</p>
+          <div className="card p-6 text-sm text-parchment/45">Nie złożyłeś jeszcze żadnego podania.</div>
         )}
       </div>
     </div>

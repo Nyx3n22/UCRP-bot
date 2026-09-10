@@ -5,16 +5,19 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        ink: "#12141c",       // tło - głęboki granat/atrament
-        parchment: "#efe8d8", // tekst podstawowy - pergamin
-        brass: "#c9a15a",     // akcent - mosiądz/złoto
-        burgundy: "#7a1f3d",  // akcent drugorzędny
-        panel: "#1b1e2b",     // tło kart
-        line: "#2c3044",      // linie/obramowania
+        ink: "#101320",        // tło - głęboki granat/atrament
+        parchment: "#efe8d8",  // tekst podstawowy - pergamin
+        brass: "#c9a15a",      // akcent - mosiądz/złoto
+        brasslight: "#dcbf85", // jaśniejszy mosiądz (hovers, highlights)
+        burgundy: "#8a2547",   // akcent drugorzędny / stany negatywne
+        panel: "#171b29",      // tło kart
+        linesoft: "#232839",   // delikatne linie wewnętrzne
+        line: "#2b3047",       // linie/obramowania
       },
       fontFamily: {
-        display: ["var(--font-fraunces)", "serif"],
-        body: ["var(--font-inter)", "sans-serif"],
+        display: ["var(--font-fraunces)", "Georgia", "serif"],
+        body: ["var(--font-inter)", "system-ui", "sans-serif"],
+        mono: ["ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"],
       },
     },
   },

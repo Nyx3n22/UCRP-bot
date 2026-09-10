@@ -23,10 +23,13 @@ export default function ApplicationForm({
 
   if (result?.ok) {
     return (
-      <div className="card p-8 text-center">
-        <p className="label-eyebrow mb-2 text-brass">Wysłano</p>
-        <h2 className="font-display text-xl mb-2">Podanie złożone</h2>
-        <p className="text-parchment/60 text-sm">
+      <div className="card card-accent p-10 text-center">
+        <span className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-full border border-brass/40 bg-brass/15 text-2xl">
+          ✅
+        </span>
+        <p className="label-eyebrow mb-2">Wysłano</p>
+        <h2 className="mb-2 font-display text-2xl">Podanie złożone</h2>
+        <p className="mx-auto max-w-md text-sm text-parchment/55">
           Twoje podanie zostało zapisane i przekazane do rozpatrzenia. Otrzymasz wiadomość na Discordzie, gdy
           administracja podejmie decyzję.
         </p>
@@ -48,11 +51,14 @@ export default function ApplicationForm({
           setResult(res);
         });
       }}
-      className="card p-8 flex flex-col gap-5"
+      className="card flex flex-col gap-5 p-8"
     >
       {fields.map((f) => (
-        <div key={f.name} className="flex flex-col gap-1">
-          <label className="text-sm text-parchment/70">{f.label}</label>
+        <div key={f.name} className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-parchment/75">
+            {f.label}
+            {f.required && <span className="ml-1 text-brass">*</span>}
+          </label>
           {f.type === "textarea" ? (
             <textarea name={f.name} rows={4} required={f.required} />
           ) : f.type === "select" ? (
@@ -68,7 +74,11 @@ export default function ApplicationForm({
         </div>
       ))}
 
-      {result && !result.ok && <p className="text-sm text-burgundy">❌ {result.error}</p>}
+      {result && !result.ok && (
+        <p className="rounded-lg border border-burgundy/60 bg-burgundy/15 px-4 py-3 text-sm text-[#eb8ea4]">
+          ❌ {result.error}
+        </p>
+      )}
 
       <button type="submit" disabled={isPending} className="btn-primary self-start">
         {isPending ? "Wysyłanie…" : "Wyślij podanie"}
