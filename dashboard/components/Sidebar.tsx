@@ -2,7 +2,7 @@ import Link from "next/link";
 import SidebarNav, { NavSection } from "./SidebarNav";
 import SignOutButton from "./SignOutButton";
 
-const NAV_SECTIONS: NavSection[] = [
+export const NAV_SECTIONS: NavSection[] = [
   {
     label: "Ogólne",
     items: [{ href: "/", label: "Przegląd" }],
@@ -44,34 +44,56 @@ const NAV_SECTIONS: NavSection[] = [
   },
 ];
 
-export default function Sidebar({ userTag }: { userTag: string }) {
+function BrandMark() {
   return (
-    <aside className="sticky top-0 flex h-screen w-72 shrink-0 flex-col border-r border-line/70 bg-gradient-to-b from-[#141828] to-[#0f121d] px-5 py-7 overflow-y-auto">
-      <div>
-        <Link href="/" className="group mb-8 flex items-center gap-3 px-2">
-          <span className="brand-crest">UC</span>
-          <span className="leading-tight">
-            <span className="block font-display text-[1.05rem] tracking-wide transition-colors group-hover:text-brasslight">
-              Uniwersytet Centralny
-            </span>
-            <span className="block text-[0.6rem] uppercase tracking-[0.24em] text-parchment/40">
-              Panel administracyjny
-            </span>
-          </span>
-        </Link>
+    <Link href="/" className="group mb-8 flex items-center gap-3 px-2">
+      <span className="brand-crest">UC</span>
+      <span className="leading-tight">
+        <span className="block font-display text-[1.05rem] tracking-wide transition-colors group-hover:text-brasslight">
+          Uniwersytet Centralny
+        </span>
+        <span className="block text-[0.6rem] uppercase tracking-[0.24em] text-parchment/40">
+          Panel administracyjny
+        </span>
+      </span>
+    </Link>
+  );
+}
 
+export function SidebarBody({ userTag }: { userTag: string }) {
+  const initial = (userTag.trim()[0] ?? "?").toUpperCase();
+  return (
+    <>
+      <div>
+        <BrandMark />
         <SidebarNav sections={NAV_SECTIONS} />
       </div>
 
-      <div className="mt-auto border-t border-line/60 px-2 pt-4">
-        <p className="text-[0.62rem] uppercase tracking-[0.18em] text-parchment/35">Zalogowano jako</p>
-        <div className="mt-1 flex items-center justify-between gap-2">
-          <span className="truncate text-sm text-parchment/80" title={userTag}>
-            {userTag}
+      <div className="mt-auto pt-6">
+        <div className="card glass flex items-center gap-3 p-3">
+          <span className="relative grid h-9 w-9 shrink-0 place-items-center rounded-full border border-brass/40 bg-brass/10 font-display text-sm text-brasslight">
+            {initial}
+            <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-panel bg-emerald-400" />
+          </span>
+          <span className="min-w-0 flex-1 leading-tight">
+            <span className="block truncate text-sm text-parchment/85" title={userTag}>
+              {userTag}
+            </span>
+            <span className="block text-[0.65rem] uppercase tracking-[0.14em] text-emerald-300/70">
+              ● online
+            </span>
           </span>
           <SignOutButton />
         </div>
       </div>
+    </>
+  );
+}
+
+export default function Sidebar({ userTag }: { userTag: string }) {
+  return (
+    <aside className="sticky top-0 hidden h-screen w-72 shrink-0 flex-col overflow-y-auto border-r border-line/70 bg-gradient-to-b from-[#141828]/90 to-[#0f121d]/90 px-5 py-7 backdrop-blur-md lg:flex">
+      <SidebarBody userTag={userTag} />
     </aside>
   );
 }

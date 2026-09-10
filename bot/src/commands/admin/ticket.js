@@ -9,6 +9,7 @@
 const { SlashCommandBuilder } = require("discord.js");
 const ticketService = require("../../services/ticketService");
 const { hasPermission } = require("../../config/roles");
+const ui = require("../../utils/embeds");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -22,22 +23,31 @@ module.exports = {
 
     if (sub === "przypisz") {
       if (!(await hasPermission(interaction.member, "MODERATE"))) {
-        return interaction.reply({ content: "❌ Brak uprawnień.", ephemeral: true });
+        return interaction.reply({
+          embeds: [ui.noPermission("Przypisywanie ticketów wymaga uprawnienia **MODERATE**.")],
+          ephemeral: true,
+        });
       }
       const ticket = await require("../../lib/prisma").ticket.findFirst({
         where: { channelId: interaction.channelId },
       });
-      if (!ticket) return interaction.reply({ content: "To nie jest kanał ticketu.", ephemeral: true });
+      if (!ticket) {
+        return ui.replyError(interaction, "Tej komendy możesz użyć tylko na **kanale ticketu**.", "To nie jest ticket");
+      }
 
       await ticketService.claimTicket(ticket.id, interaction.user.id);
-      return interaction.reply(`🙋 <@${interaction.user.id}> przejął ten ticket.`);
+      const embed = ui.success("Ticket przejęty", `🙋 <@${interaction.user.id}> zajął się tym ticketem.\n\nProsimy o chwilę cierpliwości ⏳`);
+      return interaction.reply({ embeds: [embed] });
     }
 
     if (sub === "zamknij") {
       if (!(await hasPermission(interaction.member, "MODERATE"))) {
-        return interaction.reply({ content: "❌ Brak uprawnień.", ephemeral: true });
+        return interaction.reply({
+          embeds: [ui.noPermission("Zamykanie ticketów wymaga uprawnienia **MODERATE**.")],
+          ephemeral: true,
+        });
       }
-      await interaction.reply("🔒 Zamykanie ticketu i generowanie transkrypcji...");
+      await interaction.reply({ embeds: [ui.loading("Zamykanie ticketu i generowanie transkrypcji…")] });
       await ticketService.closeTicket(interaction.guild, interaction.channel, interaction.user.id);
     }
   },

@@ -1,5 +1,6 @@
-const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
+const { SlashCommandBuilder } = require("discord.js");
 const scholarshipService = require("../../services/scholarshipService");
+const ui = require("../../utils/embeds");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -9,14 +10,26 @@ module.exports = {
 
   async execute(interaction) {
     const history = await scholarshipService.history(interaction.user.id);
-    if (history.length === 0) return interaction.reply({ content: "Nie otrzymałeś jeszcze stypendium.", ephemeral: true });
+    if (history.length === 0) {
+      return interaction.reply({
+        embeds: [ui.info("🎓 Historia stypendiów", "Nie otrzymałeś jeszcze stypendium.\n\nStypendia przyznawane są za wysoką średnią ocen (GPA).")],
+        ephemeral: true,
+      });
+    }
 
-    const embed = new EmbedBuilder()
-      .setTitle("🎓 Historia stypendiów")
-      .setDescription(
-        history.map((h) => `${h.issuedAt.toLocaleDateString("pl-PL")} — ${h.amountIC} IC (GPA ${h.gpaAtIssue.toFixed(2)})`).join("\n")
-      )
-      .setColor(0x8a1538);
+    const total = history.reduce((sum, h) => sum + h.amountIC, 0);
+    const embed = ui.base({
+      title: "🎓 Historia stypendiów",
+      description: history
+        .map((h) => `💰 **${h.amountIC} IC** — GPA **${h.gpaAtIssue.toFixed(2)}**\n└ ${h.issuedAt.toLocaleDateString("pl-PL")}`)
+        .join("\n\n"),
+      color: ui.COLORS.GOLD,
+      thumbnail: interaction.user.displayAvatarURL(),
+      fields: [
+        { name: "Wypłaty", value: `${history.length}`, inline: true },
+        { name: "Łącznie", value: `**${total} IC**`, inline: true },
+      ],
+    });
     return interaction.reply({ embeds: [embed], ephemeral: true });
   },
 };

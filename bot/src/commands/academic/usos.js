@@ -15,7 +15,6 @@
 
 const {
   SlashCommandBuilder,
-  EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
@@ -26,6 +25,7 @@ const {
 } = require("discord.js");
 const prisma = require("../../lib/prisma");
 const { hasPermission, getRoleIdForPermission } = require("../../config/roles");
+const ui = require("../../utils/embeds");
 
 function parseUserId(raw) {
   const mentionMatch = raw.match(/^<@!?(\d+)>$/);
@@ -61,16 +61,27 @@ module.exports = {
       prisma.attendanceEntry.findMany({ where: { studentId: interaction.user.id } }),
     ]);
 
-    const embed = new EmbedBuilder().setTitle("📖 USOS — Panel studenta").setColor(0x8a1538);
+    const embed = ui.base({
+      title: "📖 USOS — Panel studenta",
+      description: `Witaj, **${interaction.user.username}**! Oto Twoje dane akademickie.\n${ui.DIVIDER}`,
+      color: ui.COLORS.BURGUNDY,
+      thumbnail: interaction.user.displayAvatarURL(),
+    });
 
     if (grades.length > 0) {
       const gpa = grades.reduce((sum, g) => sum + g.value, 0) / grades.length;
       embed.addFields(
-        { name: "Oceny", value: grades.map((g) => `**${g.subject.name}** — ${g.value.toFixed(1)}`).join("\n").slice(0, 1024) },
-        { name: "Średnia (GPA)", value: gpa.toFixed(2), inline: true }
+        {
+          name: "📝 Oceny",
+          value: grades
+            .map((g) => `▸ **${g.subject.name}** — ${g.value.toFixed(1)}`)
+            .join("\n")
+            .slice(0, 1024),
+        },
+        { name: "📊 Średnia (GPA)", value: `**${gpa.toFixed(2)}**\n${ui.progressBar(gpa - 2, 3, 8)}`, inline: true }
       );
     } else {
-      embed.addFields({ name: "Oceny", value: "Brak jeszcze wystawionych ocen." });
+      embed.addFields({ name: "📝 Oceny", value: "_Brak jeszcze wystawionych ocen._" });
     }
 
     if (attendance.length > 0) {
@@ -78,34 +89,51 @@ module.exports = {
       const percent = Math.round((presentCount / attendance.length) * 100);
       const totalActivity = attendance.reduce((sum, a) => sum + a.activityPoints, 0);
       embed.addFields(
-        { name: "Frekwencja", value: `${percent}% (${presentCount}/${attendance.length})`, inline: true },
-        { name: "Aktywność", value: `${totalActivity} pkt`, inline: true }
+        { name: "🎙️ Frekwencja", value: `**${percent}%** (${presentCount}/${attendance.length})`, inline: true },
+        { name: "⚡ Aktywność", value: `**${totalActivity} pkt**`, inline: true }
       );
     }
 
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("usos_panel:napisz").setLabel("Napisz do wykładowcy").setStyle(ButtonStyle.Primary)
+      new ButtonBuilder()
+        .setCustomId("usos_panel:napisz")
+        .setLabel("Napisz do wykładowcy")
+        .setEmoji("✉️")
+        .setStyle(ButtonStyle.Primary)
     );
 
     return interaction.editReply({ embeds: [embed], components: [row] });
   },
 
   async _staffPanel(interaction, tier) {
-    const embed = new EmbedBuilder()
-      .setTitle(tier === "elevated" ? "🏛️ USOS — Panel władz uczelni" : "📚 USOS — Panel wykładowcy")
-      .setDescription("Wybierz akcję poniżej.")
-      .setColor(0x1a2a6c);
+    const embed = ui.base({
+      title: tier === "elevated" ? "🏛️ USOS — Panel władz uczelni" : "📚 USOS — Panel wykładowcy",
+      description:
+        tier === "elevated"
+          ? "Pełny dostęp: oceny, frekwencja, kadra i raporty uczelni.\nWybierz akcję poniżej 👇"
+          : "Narzędzia dydaktyczne: oceny i frekwencja studentów.\nWybierz akcję poniżej 👇",
+      color: ui.COLORS.BRASS,
+      thumbnail: interaction.user.displayAvatarURL(),
+    });
 
     const buttons = [
-      new ButtonBuilder().setCustomId("usos_panel:wystaw_ocene").setLabel("Wystaw ocenę").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId("usos_panel:wpisz_frekwencje").setLabel("Wpisz frekwencję").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId("usos_panel:wystaw_ocene")
+        .setLabel("Wystaw ocenę")
+        .setEmoji("📝")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId("usos_panel:wpisz_frekwencje")
+        .setLabel("Wpisz frekwencję")
+        .setEmoji("🎙️")
+        .setStyle(ButtonStyle.Primary),
     ];
 
     if (tier === "elevated") {
       buttons.push(
-        new ButtonBuilder().setCustomId("usos_panel:zatrudnij").setLabel("Zatrudnij").setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId("usos_panel:zwolnij").setLabel("Zwolnij").setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId("usos_panel:raport").setLabel("Wygeneruj raport").setStyle(ButtonStyle.Secondary)
+        new ButtonBuilder().setCustomId("usos_panel:zatrudnij").setLabel("Zatrudnij").setEmoji("🤝").setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId("usos_panel:zwolnij").setLabel("Zwolnij").setEmoji("🚪").setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId("usos_panel:raport").setLabel("Wygeneruj raport").setEmoji("📊").setStyle(ButtonStyle.Secondary)
       );
     }
 
@@ -206,14 +234,14 @@ module.exports = {
     const value = Number(interaction.fields.getTextInputValue("ocena").replace(",", "."));
 
     if (!studentId || Number.isNaN(value) || value < 2 || value > 5) {
-      return interaction.reply({ content: "❌ Nieprawidłowe dane (sprawdź ID studenta i ocenę 2.0-5.0).", ephemeral: true });
+      return ui.replyError(interaction, "Sprawdź ID studenta i ocenę (dozwolony zakres **2.0 – 5.0**).", "Nieprawidłowe dane");
     }
 
     const subject = await prisma.subject.findFirst({ where: { name: przedmiotNazwa } });
-    if (!subject) return interaction.reply({ content: `Nie znaleziono przedmiotu "${przedmiotNazwa}".`, ephemeral: true });
+    if (!subject) return ui.replyError(interaction, `Na uczelni nie ma przedmiotu **${przedmiotNazwa}**.`, "Nie znaleziono przedmiotu");
 
     const student = await interaction.client.users.fetch(studentId).catch(() => null);
-    if (!student) return interaction.reply({ content: "Nie znaleziono takiego użytkownika.", ephemeral: true });
+    if (!student) return ui.replyError(interaction, "Nie znaleziono takiego użytkownika na Discordzie.", "Nie znaleziono studenta");
 
     // Grade.userId to wymagany klucz obcy do DiscordUser - student bez
     // wiersza (np. nigdy nie pisał na kanałach AI) wysadziłby zapis (P2003).
@@ -221,8 +249,20 @@ module.exports = {
     await ensureDiscordUser(student.id);
 
     await prisma.grade.create({ data: { userId: student.id, subjectId: subject.id, value, issuedById: interaction.user.id } });
-    await interaction.reply(`✅ Wystawiono ocenę **${value}** z **${subject.name}** dla <@${student.id}>.`);
-    await student.send(`📖 Otrzymałeś/aś ocenę **${value}** z przedmiotu **${subject.name}**.`).catch(() => null);
+    await interaction.reply({
+      embeds: [ui.success("Ocena wystawiona", `📝 **${subject.name}** — ocena **${value}**\n\n👤 Student: <@${student.id}>`)],
+    });
+    await student
+      .send({
+        embeds: [
+          ui.base({
+            title: "📖 Nowa ocena w USOS",
+            description: `Z przedmiotu **${subject.name}** otrzymałeś/aś ocenę **${value}**.`,
+            color: ui.COLORS.BURGUNDY,
+          }),
+        ],
+      })
+      .catch(() => null);
   },
 
   async handleAttendanceModalSubmit(interaction) {
@@ -234,18 +274,20 @@ module.exports = {
     const present = ["tak", "t", "yes", "y", "1"].includes(obecnyRaw);
 
     const subject = await prisma.subject.findFirst({ where: { name: przedmiotNazwa } });
-    if (!subject) return interaction.reply({ content: `Nie znaleziono przedmiotu "${przedmiotNazwa}".`, ephemeral: true });
+    if (!subject) return ui.replyError(interaction, `Na uczelni nie ma przedmiotu **${przedmiotNazwa}**.`, "Nie znaleziono przedmiotu");
 
     const student = await interaction.client.users.fetch(studentId).catch(() => null);
-    if (!student) return interaction.reply({ content: "Nie znaleziono takiego użytkownika.", ephemeral: true });
+    if (!student) return ui.replyError(interaction, "Nie znaleziono takiego użytkownika na Discordzie.", "Nie znaleziono studenta");
 
     await prisma.attendanceEntry.create({
       data: { subjectId: subject.id, studentId: student.id, lecturerId: interaction.user.id, present, activityPoints: aktywnosc },
     });
 
-    return interaction.reply(
-      `📋 Wpisano: <@${student.id}> — **${subject.name}** — ${present ? "obecny/a ✅" : "nieobecny/a ❌"}${aktywnosc ? ` (+${aktywnosc} pkt)` : ""}`
+    const embed = ui.success(
+      "Frekwencja wpisana",
+      `📋 **${subject.name}**\n\n👤 Student: <@${student.id}>\n${present ? "✅ **Obecny/a**" : "❌ **Nieobecny/a**"}${aktywnosc ? `\n⚡ Aktywność: **+${aktywnosc} pkt**` : ""}`
     );
+    return interaction.reply({ embeds: [embed] });
   },
 
   async handleHireFireModalSubmit(interaction, mode) {
@@ -255,35 +297,32 @@ module.exports = {
     const permissionKeyMap = { wykladowca: "WYKLADOWCA_ROLE", administracja: "ADMINISTRACJA_ROLE", student: "STUDENT_ROLE" };
     const permissionKey = permissionKeyMap[stanowisko];
     if (!permissionKey) {
-      return interaction.reply({ content: "❌ Stanowisko musi być jednym z: wykladowca, administracja, student.", ephemeral: true });
+      return ui.replyError(interaction, "Stanowisko musi być jednym z: **wykladowca**, **administracja**, **student**.", "Nieprawidłowe stanowisko");
     }
 
     const roleId = await getRoleIdForPermission(permissionKey);
     if (!roleId) {
-      return interaction.reply({ content: `❌ Rola dla "${stanowisko}" nie jest skonfigurowana w Dashboardzie (zakładka Role).`, ephemeral: true });
+      return ui.replyError(interaction, `Rola dla stanowiska **${stanowisko}** nie jest skonfigurowana w Dashboardzie (zakładka Role).`, "Brak konfiguracji roli");
     }
 
     const member = await interaction.guild.members.fetch(targetId).catch(() => null);
-    if (!member) return interaction.reply({ content: "Nie znaleziono takiego użytkownika na serwerze.", ephemeral: true });
+    if (!member) return ui.replyError(interaction, "Nie znaleziono takiego użytkownika na serwerze.", "Nie znaleziono użytkownika");
 
     try {
       await member.roles[mode === "hire" ? "add" : "remove"](roleId);
     } catch (err) {
-      return interaction.reply({
-        content: "❌ Nie udało się zmienić roli — sprawdź czy rola bota jest wyżej w hierarchii niż rola docelowa.",
-        ephemeral: true,
-      });
+      return ui.replyError(interaction, "Sprawdź, czy rola bota jest **wyżej w hierarchii** niż rola docelowa.", "Nie udało się zmienić roli");
     }
 
     await prisma.actionLog.create({
       data: { actorId: interaction.user.id, action: mode === "hire" ? "USOS_ZATRUDNIENIE" : "USOS_ZWOLNIENIE", targetId, metadata: { stanowisko } },
     });
 
-    return interaction.reply(
+    const embed =
       mode === "hire"
-        ? `✅ Zatrudniono <@${targetId}> na stanowisku: **${stanowisko}**.`
-        : `✅ Zwolniono <@${targetId}> ze stanowiska: **${stanowisko}**.`
-    );
+        ? ui.success("Zatrudniono pracownika", `🤝 <@${targetId}>\n📌 Stanowisko: **${stanowisko}**\n\nWitamy w zespole! 🎉`)
+        : ui.warning("Zwolniono pracownika", `🚪 <@${targetId}>\n📌 Stanowisko: **${stanowisko}**`);
+    return interaction.reply({ embeds: [embed] });
   },
 
   async handleWriteModalSubmit(interaction, lecturerId) {
@@ -291,21 +330,36 @@ module.exports = {
 
     const tresc = interaction.fields.getTextInputValue("tresc");
     const wykladowca = await interaction.client.users.fetch(lecturerId).catch(() => null);
-    if (!wykladowca) return interaction.editReply("Nie znaleziono takiego użytkownika.");
+    if (!wykladowca) {
+      return interaction.editReply({ content: null, embeds: [ui.error("Nie znaleziono użytkownika", "Wykładowca nie istnieje lub opuścił Discorda.")] });
+    }
 
     const dm = await wykladowca
-      .send(`📩 **Wiadomość od studenta** <@${interaction.user.id}> (${interaction.user.tag}):\n\n${tresc}`)
+      .send({
+        embeds: [
+          ui.base({
+            title: "📩 Wiadomość od studenta (USOS)",
+            description: `${tresc}\n\n${ui.DIVIDER}\n👤 Od: <@${interaction.user.id}> (\`${interaction.user.tag}\`)`,
+            color: ui.COLORS.BRASS,
+          }),
+        ],
+      })
       .catch(() => null);
 
     if (!dm) {
-      return interaction.editReply("❌ Nie udało się wysłać — wykładowca może mieć zablokowane DM.");
+      return interaction.editReply({ content: null, embeds: [ui.error("Nie udało się wysłać", "Wykładowca ma prawdopodobnie **zablokowane wiadomości DM**.")] });
     }
-    return interaction.editReply(`✅ Wiadomość wysłana do <@${lecturerId}>.`);
+    return interaction.editReply({ content: null, embeds: [ui.success("Wiadomość wysłana", `Twoja wiadomość trafiła do <@${lecturerId}>.`)] });
   },
 
   async handleReportButton(interaction) {
     const subjects = await prisma.subject.findMany({ include: { grades: true, attendanceEntries: true } });
-    if (subjects.length === 0) return interaction.reply({ content: "Brak danych do raportu.", ephemeral: true });
+    if (subjects.length === 0) {
+      return interaction.reply({
+        embeds: [ui.info("🏛️ Raport akademicki", "Brak danych do raportu — dodaj najpierw przedmioty i oceny.")],
+        ephemeral: true,
+      });
+    }
 
     const allGrades = subjects.flatMap((s) => s.grades);
     const allAttendance = subjects.flatMap((s) => s.attendanceEntries);
@@ -315,14 +369,17 @@ module.exports = {
         ? Math.round((allAttendance.filter((a) => a.present).length / allAttendance.length) * 100)
         : null;
 
-    const embed = new EmbedBuilder()
-      .setTitle("🏛️ Raport akademicki — cała uczelnia")
-      .addFields(
-        { name: "Przedmioty", value: `${subjects.length}`, inline: true },
-        { name: "Średnia ocen (GPA)", value: avgGpa !== null ? avgGpa.toFixed(2) : "brak danych", inline: true },
-        { name: "Śr. frekwencja", value: presentPercent !== null ? `${presentPercent}%` : "brak danych", inline: true }
-      )
-      .setColor(0x1a2a6c);
+    const embed = ui.base({
+      title: "🏛️ Raport akademicki — cała uczelnia",
+      description: `Podsumowanie dydaktyczne wygenerowane dla <@${interaction.user.id}>.`,
+      color: ui.COLORS.BRASS,
+      thumbnail: interaction.guild?.iconURL(),
+      fields: [
+        { name: "📚 Przedmioty", value: `**${subjects.length}**`, inline: true },
+        { name: "📊 Średnia ocen (GPA)", value: avgGpa !== null ? `**${avgGpa.toFixed(2)}**` : "_brak danych_", inline: true },
+        { name: "🎙️ Śr. frekwencja", value: presentPercent !== null ? `**${presentPercent}%**` : "_brak danych_", inline: true },
+      ],
+    });
 
     return interaction.reply({ embeds: [embed], ephemeral: true });
   },

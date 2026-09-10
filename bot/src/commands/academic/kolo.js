@@ -86,7 +86,8 @@ module.exports = {
       if (sub === "opusc") return koloService.cmdLeave(interaction);
     } catch (err) {
       console.error("[kolo] Błąd komendy:", err);
-      const payload = { content: "❌ Błąd serwera. Spróbuj ponownie.", ephemeral: true };
+      const ui = require("../../utils/embeds");
+      const payload = { embeds: [ui.error("Błąd serwera", "Nie udało się wykonać komendy koła. Spróbuj ponownie za chwilę.")], ephemeral: true };
       // Metody cmd* robią deferReply na wejściu, więc zwykle odpowiadamy
       // edycją; reply tylko gdyby błąd padł przed deferem.
       if (interaction.deferred || interaction.replied) {

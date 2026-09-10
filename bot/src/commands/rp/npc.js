@@ -10,10 +10,11 @@
  * w logice) - to wciąż wywołanie modelu, tylko z innym systemowym promptem.
  */
 
-const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
+const { SlashCommandBuilder } = require("discord.js");
 const prisma = require("../../lib/prisma");
 const { generateAiReply } = require("../../services/aiGatewayService");
 const { AiCreditService, CreditError } = require("../../services/aiCreditService");
+const ui = require("../../utils/embeds");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -37,12 +38,16 @@ module.exports = {
   async _lista(interaction) {
     const npcs = await prisma.npcCharacter.findMany({ where: { active: true }, orderBy: { name: "asc" } });
     if (npcs.length === 0) {
-      return interaction.reply({ content: "Brak skonfigurowanych postaci NPC — dodaj je w Dashboardzie.", ephemeral: true });
+      return interaction.reply({
+        embeds: [ui.info("🎭 Postacie NPC", "Brak skonfigurowanych postaci NPC.\n\nDodaj je w Dashboardzie (zakładka **Postacie NPC**).")],
+        ephemeral: true,
+      });
     }
-    const embed = new EmbedBuilder()
-      .setTitle("🎭 Dostępne postacie NPC")
-      .setDescription(npcs.map((n) => `**${n.name}**`).join("\n"))
-      .setColor(0x1a2a6c);
+    const embed = ui.base({
+      title: "🎭 Dostępne postacie NPC",
+      description: `${npcs.map((n) => `▸ **${n.name}**`).join("\n")}\n\n${ui.DIVIDER}\nUżyj \`/npc rozmawiaj\`, aby porozmawiać z wybraną postacią.`,
+      color: ui.COLORS.BRASS,
+    });
     return interaction.reply({ embeds: [embed], ephemeral: true });
   },
 
@@ -52,21 +57,24 @@ module.exports = {
 
     const npc = await prisma.npcCharacter.findFirst({ where: { name: npcName, active: true } });
     if (!npc) {
-      return interaction.reply({ content: `Nie znaleziono aktywnej postaci NPC o nazwie "${npcName}".`, ephemeral: true });
+      return ui.replyError(interaction, `Nie znaleziono aktywnej postaci **${npcName}**.\n\nSprawdź listę: \`/npc lista\`.`, "Nie znaleziono NPC");
     }
 
     const aiConfig = await prisma.aiConfig.findUnique({ where: { id: "singleton" } });
     if (!aiConfig) {
-      return interaction.reply({ content: "Moduł AI nie jest skonfigurowany (brak tokena Hugging Face w Dashboardzie).", ephemeral: true });
+      return ui.replyError(interaction, "Brakuje tokena Hugging Face w Dashboardzie (zakładka **Moduł AI**).", "Moduł AI nieskonfigurowany");
     }
 
     await interaction.deferReply({ ephemeral: true });
+    await interaction.editReply({ embeds: [ui.loading(`**${npc.name}** pisze odpowiedź…`)] });
 
     let credit;
     try {
       credit = await AiCreditService.chargeForMessage(interaction.member, wiadomosc);
     } catch (err) {
-      if (err instanceof CreditError) return interaction.editReply(`⚠️ ${err.message}`);
+      if (err instanceof CreditError) {
+        return interaction.editReply({ content: null, embeds: [ui.warning("Limit kredytów AI", err.message)] });
+      }
       throw err;
     }
 
@@ -76,7 +84,7 @@ module.exports = {
     try {
       response = await generateAiReply(wiadomosc, aiConfig, { isPremium: credit.unlimited, systemPrompt });
     } catch (err) {
-      return interaction.editReply(`❌ Błąd generowania odpowiedzi: ${err.message}`);
+      return interaction.editReply({ content: null, embeds: [ui.error("Błąd generowania odpowiedzi", err.message)] });
     }
 
     // Publikacja przez webhook - wygląda jak wiadomość od "innej osoby" (nazwa+awatar NPC), nie od bota
@@ -87,7 +95,7 @@ module.exports = {
       avatarURL: npc.avatarUrl || undefined,
     });
 
-    return interaction.editReply(`✅ ${npc.name} odpowiedział/a na kanale.`);
+    return interaction.editReply({ content: null, embeds: [ui.success("NPC odpowiedział", `🎭 **${npc.name}** odpowiedział/a na kanale <#${interaction.channelId}>.`)] });
   },
 
   async _getOrCreateWebhook(channel) {

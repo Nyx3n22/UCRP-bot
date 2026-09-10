@@ -16,6 +16,7 @@ const {
   EmbedBuilder,
 } = require("discord.js");
 const { hasPermission } = require("../../config/roles");
+const ui = require("../../utils/embeds");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -36,7 +37,10 @@ module.exports = {
 
   async execute(interaction) {
     if (!(await hasPermission(interaction.member, "MANAGE_TECH")) && !(await hasPermission(interaction.member, "MODERATE"))) {
-      return interaction.reply({ content: "❌ Brak uprawnień.", ephemeral: true });
+      return interaction.reply({
+        embeds: [ui.noPermission("Wysyłanie wiadomości wymaga uprawnienia **MANAGE_TECH** lub **MODERATE**.")],
+        ephemeral: true,
+      });
     }
 
     const sub = interaction.options.getSubcommand();
@@ -68,9 +72,10 @@ module.exports = {
           new ActionRowBuilder().addComponents(
             new TextInputBuilder()
               .setCustomId("kolor")
-              .setLabel("Kolor HEX (np. 1a2a6c) - opcjonalnie")
+              .setLabel("Kolor HEX (np. c9a15a) - opcjonalnie")
               .setStyle(TextInputStyle.Short)
               .setRequired(false)
+              .setPlaceholder("c9a15a")
           ),
           new ActionRowBuilder().addComponents(
             new TextInputBuilder()
@@ -91,10 +96,10 @@ module.exports = {
   async handleTextModalSubmit(interaction, channelId) {
     const tresc = interaction.fields.getTextInputValue("tresc");
     const channel = await interaction.guild.channels.fetch(channelId).catch(() => null);
-    if (!channel) return interaction.reply({ content: "❌ Nie znaleziono kanału.", ephemeral: true });
+    if (!channel) return ui.replyError(interaction, "Kanał docelowy już nie istnieje.", "Nie znaleziono kanału");
 
     await channel.send(tresc);
-    return interaction.reply({ content: `✅ Wysłano na <#${channelId}>.`, ephemeral: true });
+    return ui.replySuccess(interaction, `Wiadomość tekstowa wysłana na <#${channelId}>.`, "Wysłano");
   },
 
   /** Wywoływane z interactionCreate.js po submit modala embed */
@@ -106,15 +111,20 @@ module.exports = {
     const stopka = interaction.fields.getTextInputValue("stopka").trim();
 
     const channel = await interaction.guild.channels.fetch(channelId).catch(() => null);
-    if (!channel) return interaction.reply({ content: "❌ Nie znaleziono kanału.", ephemeral: true });
+    if (!channel) return ui.replyError(interaction, "Kanał docelowy już nie istnieje.", "Nie znaleziono kanału");
 
-    const color = /^[0-9a-fA-F]{6}$/.test(kolorRaw) ? parseInt(kolorRaw, 16) : 0x1a2a6c;
+    // Domyślnie złoto uczelni, nie granat.
+    const color = /^[0-9a-fA-F]{6}$/.test(kolorRaw) ? parseInt(kolorRaw, 16) : ui.COLORS.BRASS;
 
-    const embed = new EmbedBuilder().setTitle(tytul).setDescription(opis).setColor(color);
+    const embed = new EmbedBuilder()
+      .setTitle(tytul)
+      .setDescription(opis)
+      .setColor(color)
+      .setTimestamp()
+      .setFooter({ text: stopka || ui.BRAND_FOOTER });
     if (obrazek) embed.setImage(obrazek);
-    if (stopka) embed.setFooter({ text: stopka });
 
     await channel.send({ embeds: [embed] });
-    return interaction.reply({ content: `✅ Wysłano embed na <#${channelId}>.`, ephemeral: true });
+    return ui.replySuccess(interaction, `Embed wysłany na <#${channelId}>.`, "Wysłano");
   },
 };

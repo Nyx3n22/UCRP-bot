@@ -1,5 +1,13 @@
-const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
+const { SlashCommandBuilder } = require("discord.js");
 const thesisService = require("../../services/thesisService");
+const ui = require("../../utils/embeds");
+
+const STATUS_LABELS = {
+  IN_PROGRESS: "🔨 W trakcie",
+  UNDER_REVIEW: "🔍 W recenzji",
+  ACCEPTED: "✅ Zaakceptowana",
+  REJECTED: "❌ Odrzucona",
+};
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -40,9 +48,11 @@ module.exports = {
         const promotor = interaction.options.getUser("promotor");
         const tytul = interaction.options.getString("tytul");
         const thesis = await thesisService.register(interaction.user.id, promotor.id, tytul);
-        return interaction.reply(
-          `📄 Praca "**${tytul}**" zarejestrowana. Promotor: <@${promotor.id}>. ID: \`${thesis.id}\``
+        const embed = ui.success(
+          "Praca zarejestrowana",
+          `📄 **${tytul}**\n\n👨‍🏫 Promotor: <@${promotor.id}>\n🆔 ID pracy: \`${thesis.id}\``
         );
+        return interaction.reply({ embeds: [embed] });
       }
 
       if (sub === "status") {
@@ -51,24 +61,36 @@ module.exports = {
         const id = interaction.options.getString("id");
         const nowyStatus = interaction.options.getString("nowy_status");
         await thesisService.updateStatus(id, nowyStatus, interaction.user.id);
-        return interaction.reply(`✅ Status pracy \`${id}\` zmieniony na **${nowyStatus}**.`);
+        const embed = ui.success(
+          "Status pracy zmieniony",
+          `🆔 Praca \`${id}\`\n📌 Nowy status: **${STATUS_LABELS[nowyStatus] ?? nowyStatus}**`
+        );
+        return interaction.reply({ embeds: [embed] });
       }
 
       if (sub === "moja") {
         const thesis = await thesisService.myThesis(interaction.user.id);
-        if (!thesis) return interaction.reply({ content: "Nie masz zarejestrowanej pracy dyplomowej.", ephemeral: true });
-        const embed = new EmbedBuilder()
-          .setTitle(`📄 ${thesis.title}`)
+        if (!thesis) {
+          return interaction.reply({
+            embeds: [ui.info("📄 Moja praca dyplomowa", "Nie masz zarejestrowanej pracy dyplomowej.\n\nUżyj `/praca zarejestruj`, aby zgłosić temat.")],
+            ephemeral: true,
+          });
+        }
+        const embed = ui
+          .base({
+            title: `📄 ${thesis.title}`,
+            color: ui.COLORS.INFO,
+            thumbnail: interaction.user.displayAvatarURL(),
+          })
           .addFields(
-            { name: "Promotor", value: `<@${thesis.supervisorId}>`, inline: true },
-            { name: "Status", value: thesis.status, inline: true }
-          )
-          .setColor(0x2a52be)
-          .setFooter({ text: `ID: ${thesis.id}` });
+            { name: "👨‍🏫 Promotor", value: `<@${thesis.supervisorId}>`, inline: true },
+            { name: "📌 Status", value: `**${STATUS_LABELS[thesis.status] ?? thesis.status}**`, inline: true },
+            { name: "🆔 ID", value: `\`${thesis.id}\``, inline: true }
+          );
         return interaction.reply({ embeds: [embed], ephemeral: true });
       }
     } catch (err) {
-      return interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
+      return ui.replyError(interaction, err.message, "Praca dyplomowa");
     }
   },
 };

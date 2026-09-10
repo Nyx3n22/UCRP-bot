@@ -5,8 +5,9 @@
  * kanałach głosowych (voiceStateUpdate.js), oba przez levelService.js.
  */
 
-const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
+const { SlashCommandBuilder } = require("discord.js");
 const levelService = require("../../services/levelService");
+const ui = require("../../utils/embeds");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -17,18 +18,19 @@ module.exports = {
   async execute(interaction) {
     const target = interaction.options.getUser("osoba") ?? interaction.user;
     const profile = await levelService.getProfile(target.id);
-    const bar = levelService.buildProgressBar(profile.xpIntoLevel, profile.xpForNext);
+    const bar = ui.progressBar(profile.xpIntoLevel, profile.xpForNext, 12);
 
-    const embed = new EmbedBuilder()
-      .setTitle(`📈 Poziom ${target.tag}`)
-      .setThumbnail(target.displayAvatarURL({ extension: "png", size: 128 }))
-      .addFields(
-        { name: "Poziom", value: `${profile.level}`, inline: true },
-        { name: "Ranking", value: `#${profile.rank}`, inline: true },
-        { name: "Łącznie XP", value: `${profile.xp}`, inline: true },
-        { name: "Postęp do następnego poziomu", value: `${bar}\n${profile.xpIntoLevel} / ${profile.xpForNext} XP` }
-      )
-      .setColor(0xf4900c);
+    const embed = ui.base({
+      title: `📈 Poziom — ${target.username}`,
+      description: `${bar}\n**${profile.xpIntoLevel}** / ${profile.xpForNext} XP do kolejnego poziomu`,
+      color: ui.COLORS.LEVEL,
+      thumbnail: target.displayAvatarURL({ extension: "png", size: 128 }),
+      fields: [
+        { name: "🏆 Poziom", value: `**${profile.level}**`, inline: true },
+        { name: "🥇 Ranking", value: `**#${profile.rank}**`, inline: true },
+        { name: "✨ Łącznie XP", value: `**${profile.xp}**`, inline: true },
+      ],
+    });
 
     return interaction.reply({ embeds: [embed] });
   },

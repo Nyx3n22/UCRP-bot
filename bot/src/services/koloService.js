@@ -81,7 +81,7 @@ class KoloService {
           `Będziesz musiał/a podać nazwę, opis oraz zaprosić min. ${MIN_INVITED} innych osób ` +
           "(oprócz siebie) - wszystkie muszą zaakceptować zaproszenie, zanim zgłoszenie trafi do oceny."
       )
-      .setColor(0x2b6cb0).setTimestamp();
+      .setColor(0x2b6cb0).setFooter({ text: "Uniwersytet Centralny RP • Koła Naukowe" }).setTimestamp();
   }
 
   buildPanelRow() {
@@ -243,7 +243,7 @@ class KoloService {
       .setTitle("🔬 Zaproszenie do koła naukowego")
       .setDescription(`**${leaderUser.tag}** zaprasza Cię do koła **${kolo.name}**.\n\n${kolo.description}`)
       .setColor(0x2b6cb0)
-      .setFooter({ text: "To zaproszenie wygasa po 72h." });
+      .setFooter({ text: "To zaproszenie wygasa po 72h • Uniwersytet Centralny RP" }).setTimestamp();
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`kolo_invite_accept:${invite.id}`).setLabel("✅ Akceptuj").setStyle(ButtonStyle.Success),
@@ -393,7 +393,7 @@ class KoloService {
         { name: "Opis", value: kolo.description.slice(0, 1000) },
         { name: "AI Score", value: `${Math.round(ai.score * 100)}%${ai.flags.length ? ` ⚠️ ${ai.flags.join(", ")}` : " ✅"}` }
       )
-      .setColor(0x2b6cb0);
+      .setColor(0x2b6cb0).setFooter({ text: "Uniwersytet Centralny RP • Koła Naukowe" }).setTimestamp();
     if (kolo.logoUrl) embed.setThumbnail(kolo.logoUrl);
 
     const row = new ActionRowBuilder().addComponents(
@@ -572,7 +572,7 @@ class KoloService {
       .setTitle(`${emoji} Koło Naukowe ${kolo.name} zostało utworzone!`)
       .setDescription(kolo.description)
       .setImage("attachment://banner.png")
-      .setColor(hex);
+      .setColor(hex).setFooter({ text: "Uniwersytet Centralny RP • Koła Naukowe" }).setTimestamp();
     if (kolo.logoUrl) welcome.setThumbnail(kolo.logoUrl);
     await ogloszenia.send({ embeds: [welcome], files: [welcomeBanner] }).catch(() => null);
   }
@@ -586,7 +586,7 @@ class KoloService {
           "musisz być na serwerze i potwierdzić poniżej.\n\n" +
           (cfg?.serverInviteLink ? `🔗 Link do serwera: ${cfg.serverInviteLink}` : "")
       )
-      .setColor(0x2b6cb0);
+      .setColor(0x2b6cb0).setFooter({ text: "Uniwersytet Centralny RP • Koła Naukowe" }).setTimestamp();
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`kolo_consent:${koloId}:${userId}`).setLabel("✅ Potwierdzam, daj mi dostęp").setStyle(ButtonStyle.Success)
     );
@@ -663,7 +663,7 @@ class KoloService {
     return new EmbedBuilder()
       .setTitle(`⚒️ Zarządzanie kołem ${kolo.name}`)
       .setDescription("Wybierz akcję z listy poniżej. Dostępne tylko dla lidera i wicelidera.")
-      .setColor(0x2b6cb0);
+      .setColor(0x2b6cb0).setFooter({ text: "Uniwersytet Centralny RP • Koła Naukowe" }).setTimestamp();
   }
 
   buildManageSelectRow() {
@@ -760,6 +760,7 @@ class KoloService {
             : "Brak",
         }
       );
+    embed.setFooter({ text: "Uniwersytet Centralny RP • Koła Naukowe" }).setTimestamp();
     if (kolo.logoUrl) embed.setThumbnail(kolo.logoUrl);
     return interaction.reply({ embeds: [embed], ephemeral: true });
   }
@@ -977,7 +978,7 @@ class KoloService {
         { name: "Nowa wartość", value: String(value) },
         { name: "AI Score", value: `${Math.round((ai.score ?? 0.5) * 100)}%` }
       )
-      .setColor(0xd69e2e);
+      .setColor(0xd69e2e).setFooter({ text: "Uniwersytet Centralny RP • Koła Naukowe" }).setTimestamp();
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`kolo_change_approve:${requestId}`).setLabel("✅ Zaakceptuj").setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(`kolo_change_reject:${requestId}`).setLabel("❌ Odrzuć").setStyle(ButtonStyle.Danger)
@@ -1190,7 +1191,7 @@ class KoloService {
           { name: "Temat", value: topicInput.slice(0, 1000) },
           { name: "AI Score", value: `${Math.round(ai.score * 100)}%` }
         )
-        .setColor(0xd69e2e);
+        .setColor(0xd69e2e).setFooter({ text: "Uniwersytet Centralny RP • Koła Naukowe" }).setTimestamp();
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`kolo_research_approve:${research.id}`).setLabel("✅ Zaakceptuj").setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId(`kolo_research_reject:${research.id}`).setLabel("❌ Odrzuć").setStyle(ButtonStyle.Danger)
@@ -1261,7 +1262,7 @@ class KoloService {
         { name: "Przydzieleni", value: members.length ? members.map((m) => `<@${m.userId}>`).join(", ").slice(0, 1000) : "Brak", inline: true }
       )
       .setColor(kolo.colorHex || 0x2b6cb0)
-      .setFooter({ text: research.isCustomTopic ? "Własny temat" : "Temat z listy oficjalnej" });
+      .setFooter({ text: `${research.isCustomTopic ? "Własny temat" : "Temat z listy oficjalnej"} • Uniwersytet Centralny RP` }).setTimestamp();
 
     await channel.send({ embeds: [embed] }).catch(() => null);
   }
@@ -1408,7 +1409,7 @@ class KoloService {
       const embed = new EmbedBuilder()
         .setTitle(`🔬 Badania koła ${membership.kolo.name}`)
         .setDescription(lines.join("\n").slice(0, 4000))
-        .setColor(membership.kolo.colorHex || 0x2b6cb0);
+        .setColor(membership.kolo.colorHex || 0x2b6cb0).setFooter({ text: "Uniwersytet Centralny RP • Koła Naukowe" }).setTimestamp();
       return interaction.editReply({ embeds: [embed] });
     }
 

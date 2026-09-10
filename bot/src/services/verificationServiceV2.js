@@ -13,7 +13,7 @@
  * Błędy logowane do ErrorLog.
  */
 
-const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, AttachmentBuilder } = require("discord.js");
+const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } = require("discord.js");
 const prisma = require("../lib/prisma");
 const { generatePesel } = require("./peselGenerator");
 const { generateCaptcha } = require("../utils/captcha");
@@ -25,6 +25,7 @@ const { logError, logAction } = require("../utils/logger");
 const { computeInitialValidUntil } = require("../utils/legitymacja");
 const { generateBanner } = require("../utils/banner");
 const { ensureDiscordUser } = require("../utils/ensureUser");
+const ui = require("../utils/embeds");
 
 const CODE_CHARSET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -38,10 +39,17 @@ function randomCode(length = 8) {
 
 class VerificationServiceV2 {
   buildPanelEmbed() {
-    return new EmbedBuilder()
-      .setTitle("🎓 Weryfikacja IC")
-      .setDescription("Aby uzyskać dostęp do serwera, kliknij przycisk poniżej i wypełnij formularz weryfikacyjny.")
-      .setColor(0x1a2a6c).setTimestamp();
+    return ui.base({
+      title: "🎓 Weryfikacja IC",
+      description:
+        "Aby uzyskać dostęp do serwera, przejdź weryfikację postaci (IC).\n\n" +
+        "**Jak to działa?**\n" +
+        "1️⃣ Wypełnij formularz postaci\n" +
+        "2️⃣ Przepisz kod z obrazka\n" +
+        "3️⃣ Potwierdź konto Roblox\n\n" +
+        `${ui.DIVIDER}\n👇 Kliknij przycisk poniżej, aby zacząć.`,
+      color: ui.COLORS.BRASS,
+    });
   }
 
   buildPanelRow() {
@@ -289,7 +297,7 @@ class VerificationServiceV2 {
         userId: interaction.user.id,
         stack: err.stack,
       });
-      await interaction.editReply("❌ Błąd serwera. Skontaktuj się z supportem.").catch(() => null);
+      await interaction.editReply({ content: null, embeds: [ui.error("Błąd serwera", "Skontaktuj się z supportem.")] }).catch(() => null);
     }
   }
 
@@ -352,12 +360,12 @@ class VerificationServiceV2 {
         if (pending.captchaAttempts >= 3) {
           this._pendingVerifications.delete(interaction.user.id);
           return interaction.reply({
-            content: "❌ 3 błędne próby. Sesja wygasła ze względów bezpieczeństwa - zacznij weryfikację od nowa.",
+            embeds: [ui.error("Sesja wygasła", "3 błędne próby. Ze względów bezpieczeństwa zacznij weryfikację **od nowa**.")],
             ephemeral: true,
           });
         }
         return interaction.reply({
-          content: `❌ Błędny kod (próba ${pending.captchaAttempts}/3). Spróbuj ponownie.`,
+          embeds: [ui.warning("Błędny kod", `Próba **${pending.captchaAttempts}/3**. Sprawdź obrazek uważnie i spróbuj ponownie.`)],
           ephemeral: true,
         });
       }
@@ -366,16 +374,16 @@ class VerificationServiceV2 {
       const config = await this._getConfig();
       pending.verificationCode = `UC-${randomCode(config.robloxCodeLength)}`;
 
-      const embed = new EmbedBuilder()
-        .setTitle("🎮 Ostatni krok — potwierdź konto Roblox (Krok 3/3)")
-        .setDescription(
+      const embed = ui.base({
+        title: "🎮 Ostatni krok — potwierdź konto Roblox (3/3)",
+        description:
           `${config.robloxInstructions}\n\n` +
           `**Twój kod (wklej dokładnie):**\n` +
           `\`\`\`${pending.verificationCode}\`\`\`\n\n` +
-          `Po udanej weryfikacji możesz usunąć kod z opisu.`
-        )
-        .setColor(0x1a2a6c)
-        .setFooter({ text: "Ten kod jest ważny przez 10 minut" });
+          `Po udanej weryfikacji możesz usunąć kod z opisu.`,
+        color: ui.COLORS.INFO,
+        footer: `Kod ważny 10 minut • ${ui.BRAND_FOOTER}`,
+      });
 
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -393,7 +401,7 @@ class VerificationServiceV2 {
       });
     } catch (err) {
       await logError("verificationService", "CAPTCHA_MODAL_ERROR", err.message, { userId: interaction.user.id, stack: err.stack });
-      await interaction.reply("❌ Błąd serwera.").catch(() => null);
+      await interaction.reply({ embeds: [ui.error("Błąd serwera", "Spróbuj ponownie za chwilę.")] }).catch(() => null);
     }
   }
 
@@ -537,7 +545,7 @@ class VerificationServiceV2 {
         userId: interaction.user.id,
         stack: err.stack,
       });
-      await interaction.editReply("❌ Błąd serwera. Skontaktuj się z supportem.").catch(() => null);
+      await interaction.editReply({ content: null, embeds: [ui.error("Błąd serwera", "Skontaktuj się z supportem.")] }).catch(() => null);
     }
   }
 
@@ -590,10 +598,11 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
     const channel = await guild.channels.fetch(reviewChannelId).catch(() => null);
     if (!channel) return;
 
-    const embed = new EmbedBuilder()
-      .setTitle("🔍 Nowa weryfikacja do przeglądu")
-      .setColor(aiScore < 0.6 ? 0xff6b6b : 0xffd700)
-      .addFields(
+    const embed = ui.base({
+      title: "🔍 Nowa weryfikacja do przeglądu",
+      description: `Kandydat: <@${attempt.userId}>\n\n${ui.DIVIDER}`,
+      color: aiScore < 0.6 ? ui.COLORS.ERROR : ui.COLORS.GOLD,
+      fields: [
         { name: "👤 Kandydat", value: `<@${attempt.userId}>`, inline: true },
         { name: "📛 Imię IC", value: pending.firstNameIC, inline: true },
         { name: "📛 Nazwisko IC", value: pending.lastNameIC, inline: true },
@@ -603,8 +612,9 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
           name: "🤖 AI Score",
           value: `${(aiScore * 100).toFixed(0)}% ${aiScore > 0.8 ? "✅" : aiScore > 0.5 ? "⚠️" : "❌"}`,
           inline: true,
-        }
-      );
+        },
+      ],
+    });
 
     if (aiFlags.length > 0) {
       // UWAGA: w discord.js v14 nie ma już .addField (pojedynczego) -
@@ -798,10 +808,10 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
 
         // Wyślij wiadomość do kandydata
         const user = await interaction.client.users.fetch(attempt.userId).catch(() => null);
-        await user?.send("🎉 Twoja weryfikacja została zaakceptowana! Masz już dostęp do pełnego serwera.").catch(() => null);
+        await user?.send({ embeds: [ui.success("Weryfikacja zaakceptowana! 🎉", "Twoja postać została **zweryfikowana**!\n\nMasz już dostęp do pełnego serwera. Powodzenia na uczelni! 🍀")] }).catch(() => null);
 
         await logAction("verification_approved_manual", attempt.userId, interaction.user.id, { attemptId });
-        return interaction.editReply({ content: "✅ Weryfikacja zaakceptowana." });
+        return interaction.editReply({ content: null, embeds: [ui.success("Weryfikacja zaakceptowana", `Kandydat: <@${attempt.userId}>`)] });
       } else if (decision === "REJECTED") {
         await prisma.verificationAttempt.update({
           where: { id: attemptId },
@@ -819,11 +829,11 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
 
         const user = await interaction.client.users.fetch(attempt.userId).catch(() => null);
         await user
-          ?.send("❌ Twoja weryfikacja została odrzucona. Możesz spróbować ponownie za 24 godziny.")
+          ?.send({ embeds: [ui.error("Weryfikacja odrzucona", "Twoja weryfikacja została **odrzucona**.\n\nMożesz spróbować ponownie za **24 godziny**.")] })
           .catch(() => null);
 
         await logAction("verification_rejected_manual", attempt.userId, interaction.user.id, { attemptId });
-        return interaction.editReply({ content: "❌ Weryfikacja odrzucona." });
+        return interaction.editReply({ content: null, embeds: [ui.error("Weryfikacja odrzucona", `Kandydat: <@${attempt.userId}>`)] });
       } else if (decision === "NEEDS_MORE_INFO") {
         await prisma.verificationAttempt.update({
           where: { id: attemptId },
@@ -841,7 +851,8 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
 
         await logAction("verification_needs_info", attempt.userId, interaction.user.id, { attemptId });
         return interaction.editReply({
-          content: "❓ Wysłano pytanie do kandydata. Czeka na odpowiedź.",
+          content: null,
+          embeds: [ui.info("❓ Poproszono o uzupełnienie", `Kandydat: <@${attempt.userId}>\n\nWeryfikacja wróciła do kolejki — czeka na odpowiedź kandydata.`)],
         });
       }
     } catch (err) {
@@ -850,7 +861,7 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
         attemptId,
         stack: err.stack,
       });
-      await interaction.editReply("❌ Błąd podczas przetwarzania decyzji.").catch(() => null);
+      await interaction.editReply({ content: null, embeds: [ui.error("Błąd decyzji", "Nie udało się przetworzyć decyzji. Spróbuj ponownie.")] }).catch(() => null);
     }
   }
 

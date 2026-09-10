@@ -4,10 +4,11 @@
  * po stronie Dashboardu — tu operujemy na categoryKey przekazanym z komendy/przycisku).
  */
 
-const { ChannelType, PermissionFlagsBits, AttachmentBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
+const { ChannelType, PermissionFlagsBits, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
 const prisma = require("../lib/prisma");
 const { getBoundChannelId } = require("../config/channels");
 const { generateBanner } = require("../utils/banner");
+const ui = require("../utils/embeds");
 
 const CATEGORY_LABELS = {
   SUPPORT: { label: "Pomoc techniczna", emoji: "🛠️" },
@@ -17,10 +18,16 @@ const CATEGORY_LABELS = {
 
 class TicketService {
   buildPanelEmbed() {
-    return new EmbedBuilder()
-      .setTitle("🎫 Centrum pomocy")
-      .setDescription("Wybierz kategorię swojej sprawy, aby otworzyć prywatny ticket z odpowiednim zespołem.")
-      .setColor(0x1a2a6c).setTimestamp();
+    return ui.base({
+      title: "🎫 Centrum pomocy",
+      description:
+        "Wybierz kategorię swojej sprawy, aby otworzyć **prywatny ticket** z odpowiednim zespołem.\n\n" +
+        Object.entries(CATEGORY_LABELS)
+          .map(([, { label, emoji }]) => `${emoji} **${label}**`)
+          .join("\n") +
+        `\n\n${ui.DIVIDER}\n⏱️ Średni czas odpowiedzi: do 24h`,
+      color: ui.COLORS.BRASS,
+    });
   }
 
   buildPanelRow() {
@@ -59,7 +66,10 @@ class TicketService {
     await interaction.deferReply({ ephemeral: true });
     const categoryChannelId = await getBoundChannelId(`TICKET_CATEGORY_${categoryKey}`);
     const { channel } = await this.openTicket(interaction.guild, interaction.member, categoryKey, categoryChannelId);
-    return interaction.editReply(`✅ Ticket utworzony: <#${channel.id}>`);
+    return interaction.editReply({
+      content: null,
+      embeds: [ui.success("Ticket utworzony", `🎫 Twój ticket: <#${channel.id}>\n\nOpisz sprawę — administracja odpowie najszybciej jak to możliwe.`)],
+    });
   }
 
   async openTicket(guild, member, categoryKey, categoryChannelId) {
@@ -90,9 +100,21 @@ class TicketService {
       },
     });
 
-    await channel.send(
-      `🎫 Ticket otwarty przez <@${member.id}>. Kategoria: **${categoryKey}**. Administracja zostanie powiadomiona.`
-    );
+    const cat = CATEGORY_LABELS[categoryKey];
+    await channel.send({
+      content: `<@${member.id}>`,
+      embeds: [
+        ui.base({
+          title: `${cat?.emoji ?? "🎫"} Ticket otwarty — ${cat?.label ?? categoryKey}`,
+          description:
+            `Witaj, <@${member.id}>! Twój ticket jest już widoczny dla administracji.\n\n` +
+            `📝 **Opisz dokładnie swoją sprawę** w tym kanale.\n⏳ Prosimy o chwilę cierpliwości.\n\n` +
+            `${ui.DIVIDER}\n🆔 ID ticketu: \`${ticket.id}\``,
+          color: ui.COLORS.BRASS,
+          thumbnail: member.user.displayAvatarURL(),
+        }),
+      ],
+    });
 
     return { ticket, channel };
   }
@@ -123,8 +145,18 @@ class TicketService {
       const attachment = new AttachmentBuilder(Buffer.from(html, "utf-8"), {
         name: `transkrypcja-${ticket.id}.html`,
       });
+      const cat = CATEGORY_LABELS[ticket.categoryKey];
       await transcriptChannel.send({
-        content: `📄 Transkrypcja ticketu \`${ticket.id}\` (właściciel: <@${ticket.ownerId}>, zamknięty przez: <@${closedById}>)`,
+        embeds: [
+          ui.base({
+            title: "📄 Transkrypcja ticketu",
+            description:
+              `${cat?.emoji ?? "🎫"} Kategoria: **${cat?.label ?? ticket.categoryKey}**\n` +
+              `👤 Właściciel: <@${ticket.ownerId}>\n🔒 Zamknięty przez: <@${closedById}>\n` +
+              `💬 Wiadomości: **${messages.length}**\n\n${ui.DIVIDER}\n🆔 ID ticketu: \`${ticket.id}\``,
+            color: ui.COLORS.INK,
+          }),
+        ],
         files: [attachment],
       });
     }
@@ -161,13 +193,14 @@ class TicketService {
     return `<!DOCTYPE html>
 <html lang="pl"><head><meta charset="UTF-8"><title>Transkrypcja #${this._escape(channel.name)}</title>
 <style>
-  body { font-family: sans-serif; background:#1e1f22; color:#eee; padding:20px; }
-  .msg { border-bottom:1px solid #333; padding:8px 0; }
-  .author { font-weight:bold; color:#8a1538; }
-  .time { color:#888; font-size:12px; margin-left:8px; }
+  body { font-family: 'Segoe UI', sans-serif; background:#101320; color:#efe8d8; padding:28px; max-width:900px; margin:0 auto; }
+  h2 { color:#c9a15a; border-bottom:2px solid #c9a15a; padding-bottom:10px; }
+  .msg { border-bottom:1px solid #2b3047; padding:10px 0; }
+  .author { font-weight:bold; color:#dcbf85; }
+  .time { color:#8a8fa8; font-size:12px; margin-left:8px; }
   .content { margin-top:4px; white-space:pre-wrap; }
 </style></head>
-<body><h2>Transkrypcja #${this._escape(channel.name)}</h2>${rows}</body></html>`;
+<body><h2>🎫 Transkrypcja #${this._escape(channel.name)}</h2><p>Uniwersytet Centralny RP</p>${rows}</body></html>`;
   }
 
   _escape(str) {

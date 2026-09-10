@@ -11,7 +11,8 @@
  * Wzorzec: Service Layer + Collector Pattern (discord.js MessageCollector per student)
  */
 
-const { EmbedBuilder, AttachmentBuilder } = require("discord.js");
+const { AttachmentBuilder } = require("discord.js");
+const ui = require("../utils/embeds");
 const prisma = require("../lib/prisma");
 
 const ANSWER_TIMEOUT_MS = 5 * 60 * 1000; // 5 minut na pytanie
@@ -97,22 +98,24 @@ class ExamService {
 
     await dm.send({
       embeds: [
-        new EmbedBuilder()
-          .setTitle(`📝 Egzamin: ${subject.name} — ${session.topic}`)
-          .setDescription(
-            `Masz ${subject.questions.length} pytań. Na każde odpowiedz w ciągu 5 minut, wysyłając wiadomość na tym czacie.`
-          )
-          .setColor(0x1a2a6c),
+        ui.base({
+          title: `📝 Egzamin: ${subject.name}`,
+          description: `🗂️ Temat: *${session.topic}*\n\nMasz **${subject.questions.length} pytań**. Na każde odpowiedz w ciągu **5 minut**, wysyłając wiadomość na tym czacie.\n\nPowodzenia! 🍀`,
+          color: ui.COLORS.BURGUNDY,
+          thumbnail: guild?.iconURL(),
+        }),
       ],
     });
 
     for (const question of subject.questions) {
       await dm.send({
         embeds: [
-          new EmbedBuilder()
-            .setTitle(`Pytanie ${question.order + 1}/${subject.questions.length}`)
-            .setDescription(question.content)
-            .setColor(0x2a52be),
+          ui.base({
+            title: `❓ Pytanie ${question.order + 1}/${subject.questions.length}`,
+            description: `${question.content}\n\n${ui.progressBar(question.order, subject.questions.length, 10)}`,
+            color: ui.COLORS.INFO,
+            footer: `Odpowiedz w ciągu 5 minut • ${ui.BRAND_FOOTER}`,
+          }),
         ],
       });
 

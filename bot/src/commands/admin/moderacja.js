@@ -3,10 +3,23 @@
  * Podstawowe komendy administracyjne + wydawanie kar dyscyplinarnych IC.
  */
 
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require("discord.js");
+const { SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
 const { hasPermission } = require("../../config/roles");
 const punishmentService = require("../../services/punishmentService");
 const prisma = require("../../lib/prisma");
+const ui = require("../../utils/embeds");
+
+/** Wspólny szablon embeda decyzji moderacyjnej. */
+function moderationEmbed({ icon, title, targetId, reason, moderatorId, color, thumbnail }) {
+  return ui.base({
+    title: `${icon} ${title}`,
+    description: `👤 Ukarany: <@${targetId}>\n📝 Powód: *${reason}*\n\n${ui.DIVIDER}\n🛡️ Moderator: <@${moderatorId}>`,
+    color,
+    thumbnail,
+  });
+}
+
+const HIERARCHY_HINT = "Najczęstsze przyczyny: brak uprawnień bota albo **wyższa rola** ukaranego.";
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -70,7 +83,10 @@ module.exports = {
     const sub = interaction.options.getSubcommand();
 
     if (!(await hasPermission(interaction.member, "MODERATE")) && sub !== "kara") {
-      return interaction.reply({ content: "❌ Brak uprawnień.", ephemeral: true });
+      return interaction.reply({
+        embeds: [ui.noPermission("Narzędzia moderacyjne wymagają uprawnienia **MODERATE**.")],
+        ephemeral: true,
+      });
     }
 
     if (sub === "ban") return this._ban(interaction);
@@ -87,24 +103,44 @@ module.exports = {
     try {
       await interaction.guild.members.ban(user.id, { reason });
     } catch (err) {
-      return interaction.reply({ content: `❌ Nie udało się zbanować (brak uprawnień bota / wyższa rola celu?).`, ephemeral: true });
+      return ui.replyError(interaction, HIERARCHY_HINT, "Nie udało się zbanować");
     }
     await this._log(interaction, "BAN", user.id, { reason });
-    return interaction.reply(`🔨 Zbanowano <@${user.id}>. Powód: ${reason}`);
+    const embed = moderationEmbed({
+      icon: "🔨",
+      title: "Użytkownik zbanowany",
+      targetId: user.id,
+      reason,
+      moderatorId: interaction.user.id,
+      color: ui.COLORS.ERROR,
+      thumbnail: user.displayAvatarURL(),
+    });
+    return interaction.reply({ embeds: [embed] });
   },
 
   async _kick(interaction) {
     const user = interaction.options.getUser("uzytkownik");
     const reason = interaction.options.getString("powod");
     const member = await interaction.guild.members.fetch(user.id).catch(() => null);
-    if (!member) return interaction.reply({ content: "❌ Tego użytkownika nie ma na serwerze.", ephemeral: true });
+    if (!member) {
+      return ui.replyError(interaction, "Tego użytkownika nie ma na serwerze — nie można go wyrzucić.", "Nie znaleziono użytkownika");
+    }
     try {
       await member.kick(reason);
     } catch (err) {
-      return interaction.reply({ content: `❌ Nie udało się wyrzucić (brak uprawnień bota / wyższa rola celu?).`, ephemeral: true });
+      return ui.replyError(interaction, HIERARCHY_HINT, "Nie udało się wyrzucić");
     }
     await this._log(interaction, "KICK", user.id, { reason });
-    return interaction.reply(`👢 Wyrzucono <@${user.id}>. Powód: ${reason}`);
+    const embed = moderationEmbed({
+      icon: "👢",
+      title: "Użytkownik wyrzucony",
+      targetId: user.id,
+      reason,
+      moderatorId: interaction.user.id,
+      color: ui.COLORS.WARNING,
+      thumbnail: user.displayAvatarURL(),
+    });
+    return interaction.reply({ embeds: [embed] });
   },
 
   async _mute(interaction) {
@@ -112,24 +148,32 @@ module.exports = {
     const minutes = interaction.options.getInteger("minuty");
     const reason = interaction.options.getString("powod");
     const member = await interaction.guild.members.fetch(user.id).catch(() => null);
-    if (!member) return interaction.reply({ content: "❌ Tego użytkownika nie ma na serwerze.", ephemeral: true });
+    if (!member) {
+      return ui.replyError(interaction, "Tego użytkownika nie ma na serwerze — nie można go wyciszyć.", "Nie znaleziono użytkownika");
+    }
     try {
       await member.timeout(minutes * 60 * 1000, reason);
     } catch (err) {
-      return interaction.reply({ content: `❌ Nie udało się wyciszyć (brak uprawnień bota / wyższa rola celu?).`, ephemeral: true });
+      return ui.replyError(interaction, HIERARCHY_HINT, "Nie udało się wyciszyć");
     }
     await this._log(interaction, "MUTE", user.id, { reason, minutes });
-    return interaction.reply(`🔇 Wyciszono <@${user.id}> na ${minutes} min. Powód: ${reason}`);
+    const embed = ui.base({
+      title: "🔇 Użytkownik wyciszony",
+      description: `👤 Wyciszony: <@${user.id}>\n⏱️ Czas: **${minutes} min**\n📝 Powód: *${reason}*\n\n${ui.DIVIDER}\n🛡️ Moderator: <@${interaction.user.id}>`,
+      color: ui.COLORS.WARNING,
+      thumbnail: user.displayAvatarURL(),
+    });
+    return interaction.reply({ embeds: [embed] });
   },
 
   async _clear(interaction) {
     const amount = interaction.options.getInteger("ilosc");
     if (amount < 1 || amount > 100) {
-      return interaction.reply({ content: "Podaj wartość 1-100.", ephemeral: true });
+      return ui.replyError(interaction, "Podaj liczbę wiadomości z zakresu **1 – 100**.", "Nieprawidłowa liczba");
     }
     const deleted = await interaction.channel.bulkDelete(amount, true);
     await this._log(interaction, "CLEAR", null, { amount: deleted.size, channel: interaction.channel.id });
-    return interaction.reply({ content: `🧹 Usunięto ${deleted.size} wiadomości.`, ephemeral: true });
+    return ui.replySuccess(interaction, `🧹 Usunięto **${deleted.size}** wiadomości z <#${interaction.channel.id}>.`, "Kanał wyczyszczony");
   },
 
   async _kara(interaction) {
@@ -141,7 +185,10 @@ module.exports = {
     const requiresHighAuth = severity === "WYDALENIE" || severity === "ZAWIESZENIE";
     const permKey = requiresHighAuth ? "MANAGE_DEANERY" : "MODERATE";
     if (!(await hasPermission(interaction.member, permKey))) {
-      return interaction.reply({ content: "❌ Brak uprawnień do wydania tej kary.", ephemeral: true });
+      return interaction.reply({
+        embeds: [ui.noPermission(`Kara **${severity}** wymaga uprawnienia **${permKey}**.`)],
+        ephemeral: true,
+      });
     }
 
     await punishmentService.issue(interaction.guild, {
@@ -151,25 +198,33 @@ module.exports = {
       severity,
     });
 
-    return interaction.reply(`⚖️ Wydano karę **${severity}** dla <@${user.id}>. Powód: ${reason}`);
+    const SEVERITY_ICONS = { UPOMNIENIE: "📝", NAGANA: "⚠️", ZAWIESZENIE: "⛔", WYDALENIE: "🔨" };
+    const embed = ui.base({
+      title: `⚖️ Kara dyscyplinarna: ${severity}`,
+      description: `${SEVERITY_ICONS[severity] ?? "⚖️"} Ukarany: <@${user.id}>\n📝 Powód: *${reason}*\n\n${ui.DIVIDER}\n🛡️ Wystawił: <@${interaction.user.id}>`,
+      color: requiresHighAuth ? ui.COLORS.ERROR : ui.COLORS.BURGUNDY,
+      thumbnail: user.displayAvatarURL(),
+    });
+    return interaction.reply({ embeds: [embed] });
   },
 
   async _ogloszenie(interaction) {
     const { getBoundChannelId } = require("../../config/channels");
-    const treść = interaction.options.getString("tresc");
+    const tresc = interaction.options.getString("tresc");
     const channelId = await getBoundChannelId("ANNOUNCEMENTS");
-    if (!channelId) return interaction.reply({ content: "Kanał ogłoszeń nie jest skonfigurowany w Dashboardzie.", ephemeral: true });
+    if (!channelId) {
+      return ui.replyError(interaction, "Kanał ogłoszeń nie jest skonfigurowany w Dashboardzie (klucz **ANNOUNCEMENTS**).", "Brak konfiguracji");
+    }
 
     const channel = await interaction.guild.channels.fetch(channelId);
-    const embed = new EmbedBuilder()
-      .setTitle("📢 Ogłoszenie")
-      .setDescription(treść)
-      .setColor(0x1a2a6c)
-      .setFooter({ text: `Nadawca: ${interaction.user.tag}` })
-      .setTimestamp();
+    const embed = ui.base({
+      title: "📢 Ogłoszenie",
+      description: `${tresc}\n\n${ui.DIVIDER}\n✍️ Nadawca: <@${interaction.user.id}>`,
+      color: ui.COLORS.INK,
+    });
 
     await channel.send({ embeds: [embed] });
-    return interaction.reply({ content: "✅ Ogłoszenie wysłane.", ephemeral: true });
+    return ui.replySuccess(interaction, `Ogłoszenie opublikowane na <#${channelId}>.`, "Wysłano");
   },
 
   async _log(interaction, action, targetId, metadata) {

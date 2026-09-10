@@ -8,6 +8,7 @@
 const { SlashCommandBuilder } = require("discord.js");
 const reactionRoleService = require("../../services/reactionRoleService");
 const { hasPermission } = require("../../config/roles");
+const ui = require("../../utils/embeds");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -23,7 +24,10 @@ module.exports = {
 
   async execute(interaction) {
     if (!(await hasPermission(interaction.member, "MANAGE_REACTION_ROLES"))) {
-      return interaction.reply({ content: "❌ Brak uprawnień.", ephemeral: true });
+      return interaction.reply({
+        embeds: [ui.noPermission("Panele autoról wymagają uprawnienia **MANAGE_REACTION_ROLES**.")],
+        ephemeral: true,
+      });
     }
 
     const sub = interaction.options.getSubcommand();
@@ -31,25 +35,32 @@ module.exports = {
     if (sub === "grupy") {
       const groups = await reactionRoleService.listGroups();
       if (groups.length === 0) {
-        return interaction.reply({ content: "Brak skonfigurowanych grup — dodaj je w Dashboardzie.", ephemeral: true });
+        return interaction.reply({
+          embeds: [ui.info("🎭 Grupy autoról", "Brak skonfigurowanych grup — dodaj je w Dashboardzie (zakładka **Autorole**).")],
+          ephemeral: true,
+        });
       }
-      const list = groups.map((g) => `\`${g.key}\` — ${g.title}`).join("\n");
-      return interaction.reply({ content: `**Dostępne grupy:**\n${list}`, ephemeral: true });
+      const embed = ui.base({
+        title: "🎭 Dostępne grupy autoról",
+        description: groups.map((g) => `▸ \`${g.key}\` — **${g.title}**`).join("\n"),
+        color: ui.COLORS.BRASS,
+      });
+      return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
     if (sub === "panel") {
       const key = interaction.options.getString("grupa");
       const group = await reactionRoleService.getGroup(key);
       if (!group) {
-        return interaction.reply({ content: `Nie znaleziono grupy o kluczu "${key}". Sprawdź \`/autorole grupy\`.`, ephemeral: true });
+        return ui.replyError(interaction, `Nie znaleziono grupy o kluczu \`${key}\`. Sprawdź \`/autorole grupy\`.`, "Nie znaleziono grupy");
       }
 
       try {
         const { embed, rows } = reactionRoleService.buildPanel(group);
         await interaction.channel.send({ embeds: [embed], components: rows });
-        return interaction.reply({ content: `✅ Panel "${group.title}" opublikowany.`, ephemeral: true });
+        return ui.replySuccess(interaction, `Panel **${group.title}** opublikowany na <#${interaction.channelId}>.`, "Panel opublikowany");
       } catch (err) {
-        return interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
+        return ui.replyError(interaction, err.message, "Nie udało się opublikować panelu");
       }
     }
   },
