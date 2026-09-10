@@ -6,10 +6,11 @@
  * Modal jest obsługiwany w interactionCreate.js (customId: "dziekanat_modal").
  */
 
-const { SlashCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, EmbedBuilder } = require("discord.js");
+const { SlashCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require("discord.js");
 const { hasPermission } = require("../../config/roles");
 const prisma = require("../../lib/prisma");
 const { computeRenewedValidUntil, VALIDITY_DAYS } = require("../../utils/legitymacja");
+const ui = require("../../utils/embeds");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -25,7 +26,10 @@ module.exports = {
 
   async execute(interaction) {
     if (!(await hasPermission(interaction.member, "MANAGE_DEANERY"))) {
-      return interaction.reply({ content: "❌ Brak uprawnień (wymagany Dziekanat/Władze Uczelni).", ephemeral: true });
+      return interaction.reply({
+        embeds: [ui.noPermission("Narzędzia Dziekanatu wymagają uprawnienia **MANAGE_DEANERY** (Dziekanat / Władze Uczelni).")],
+        ephemeral: true,
+      });
     }
 
     const sub = interaction.options.getSubcommand();
@@ -34,16 +38,16 @@ module.exports = {
       const target = interaction.options.getUser("osoba");
       const character = await prisma.character.findUnique({ where: { userId: target.id } });
       if (!character) {
-        return interaction.reply({ content: "❌ Ta osoba nie ma jeszcze postaci.", ephemeral: true });
+        return ui.replyError(interaction, `<@${target.id}> nie ma jeszcze utworzonej postaci.`, "Brak postaci");
       }
 
       const newValidUntil = computeRenewedValidUntil();
       await prisma.character.update({ where: { userId: target.id }, data: { legitValidUntil: newValidUntil } });
 
-      const embed = new EmbedBuilder()
-        .setTitle("🪪 Legitymacja przedłużona")
-        .setDescription(`Ważność legitymacji <@${target.id}> została przedłużona do **${newValidUntil.toLocaleDateString("pl-PL")}**.`)
-        .setColor(0x1a2a6c);
+      const embed = ui.success(
+        "Legitymacja przedłużona",
+        `🪪 Ważność legitymacji <@${target.id}> przedłużona do **${newValidUntil.toLocaleDateString("pl-PL")}**.\n\n${ui.DIVIDER}\n🏛️ Wystawił: <@${interaction.user.id}> (Dziekanat)`
+      );
 
       await target.send({ embeds: [embed] }).catch(() => null);
       return interaction.reply({ embeds: [embed] });

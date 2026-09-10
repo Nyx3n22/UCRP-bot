@@ -6,8 +6,9 @@
  * z rzeczywistym standardem — edytowalne parametrem).
  */
 
-const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
+const { SlashCommandBuilder } = require("discord.js");
 const prisma = require("../../lib/prisma");
+const ui = require("../../utils/embeds");
 
 const PASSING_GRADE = 3.0;
 const DEFAULT_REQUIRED_PER_YEAR = 30;
@@ -35,16 +36,20 @@ module.exports = {
     }
 
     const collected = Array.from(bySubject.values()).reduce((sum, g) => sum + g.subject.ectsPoints, 0);
-    const percent = Math.min(100, Math.round((collected / required) * 100));
+    const done = collected >= required;
+    const bar = ui.progressBar(collected, required, 12);
 
-    const embed = new EmbedBuilder()
-      .setTitle("📊 Punkty ECTS")
-      .addFields(
-        { name: "Zebrane", value: `${collected} ECTS`, inline: true },
-        { name: "Wymagane (rok)", value: `${required} ECTS`, inline: true },
-        { name: "Postęp", value: `${percent}%`, inline: true }
-      )
-      .setColor(collected >= required ? 0x2ecc71 : 0xe67e22);
+    const embed = ui.base({
+      title: "📊 Punkty ECTS",
+      description: `${bar}\n\n${done ? "🎉 **Wymagana pula zebrana!**" : `Brakuje jeszcze **${required - collected} ECTS**.`}`,
+      color: done ? ui.COLORS.SUCCESS : ui.COLORS.GOLD,
+      thumbnail: interaction.user.displayAvatarURL(),
+      fields: [
+        { name: "Zebrane", value: `**${collected}** ECTS`, inline: true },
+        { name: "Wymagane (rok)", value: `**${required}** ECTS`, inline: true },
+        { name: "Zaliczone przedmioty", value: `${bySubject.size}`, inline: true },
+      ],
+    });
 
     await interaction.reply({ embeds: [embed], ephemeral: true });
   },

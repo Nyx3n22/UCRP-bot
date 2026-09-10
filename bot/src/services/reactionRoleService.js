@@ -6,8 +6,9 @@
  * nie jest hardkodowana w komendzie.
  */
 
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
 const prisma = require("../lib/prisma");
+const ui = require("../utils/embeds");
 
 const STYLE_MAP = {
   PRIMARY: ButtonStyle.Primary,
@@ -40,10 +41,14 @@ class ReactionRoleService {
       throw new Error(`Grupa "${group.key}" ma za dużo opcji (limit Discorda: ${MAX_BUTTONS_PER_ROW * MAX_ROWS}).`);
     }
 
-    const embed = new EmbedBuilder()
-      .setTitle(group.title)
-      .setDescription(group.description ?? "Kliknij przycisk, aby nadać lub zdjąć rolę.")
-      .setColor(0x1a2a6c);
+    const description =
+      group.description ?? "Kliknij przycisk, aby nadać lub zdjąć rolę.";
+
+    const embed = ui.base({
+      title: `🎭 ${group.title}`,
+      description: `${description}\n\n${ui.DIVIDER}\n👆 Kliknij przycisk, aby **nadać** rolę. Ponowne kliknięcie ją **zdejmuje**.`,
+      color: ui.COLORS.BRASS,
+    });
 
     const rows = [];
     for (let i = 0; i < group.options.length; i += MAX_BUTTONS_PER_ROW) {

@@ -1,5 +1,6 @@
-const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
+const { SlashCommandBuilder } = require("discord.js");
 const libraryService = require("../../services/libraryService");
+const ui = require("../../utils/embeds");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -26,31 +27,41 @@ module.exports = {
     try {
       if (sub === "wypozycz") {
         const loan = await libraryService.borrow(interaction.user.id, title);
-        return interaction.reply(
-          `📗 Wypożyczono **${title}**. Termin zwrotu: ${loan.dueAt.toLocaleDateString("pl-PL")}.`
+        const embed = ui.success(
+          "Wypożyczono zasób",
+          `📗 **${title}**\n\n⏳ Termin zwrotu: **${loan.dueAt.toLocaleDateString("pl-PL")}**`
         );
+        return interaction.reply({ embeds: [embed] });
       }
 
       if (sub === "oddaj") {
         await libraryService.return_(interaction.user.id, title);
-        return interaction.reply(`📘 Zwrócono **${title}**. Dziękujemy!`);
+        const embed = ui.success("Zwrócono zasób", `📘 **${title}**\n\nDziękujemy za terminowy zwrot!`);
+        return interaction.reply({ embeds: [embed] });
       }
 
       if (sub === "moje") {
         const loans = await libraryService.myLoans(interaction.user.id);
         if (loans.length === 0) {
-          return interaction.reply({ content: "Nie masz aktywnych wypożyczeń.", ephemeral: true });
+          return interaction.reply({
+            embeds: [ui.info("📚 Twoje wypożyczenia", "Nie masz aktywnych wypożyczeń.\n\nUżyj `/biblioteka wypozycz`, aby wypożyczyć zasób.")],
+            ephemeral: true,
+          });
         }
-        const embed = new EmbedBuilder()
-          .setTitle("📚 Twoje wypożyczenia")
-          .setDescription(
-            loans.map((l) => `**${l.resource.title}** — do ${l.dueAt.toLocaleDateString("pl-PL")}`).join("\n")
-          )
-          .setColor(0x2a52be);
+        const embed = ui
+          .base({
+            title: "📚 Twoje wypożyczenia",
+            description: loans
+              .map((l) => `📖 **${l.resource.title}**\n└ do **${l.dueAt.toLocaleDateString("pl-PL")}**`)
+              .join("\n\n"),
+            color: ui.COLORS.INFO,
+            thumbnail: interaction.user.displayAvatarURL(),
+          })
+          .addFields({ name: "Aktywne wypożyczenia", value: `${loans.length}`, inline: true });
         return interaction.reply({ embeds: [embed], ephemeral: true });
       }
     } catch (err) {
-      return interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
+      return ui.replyError(interaction, err.message, "Biblioteka");
     }
   },
 };

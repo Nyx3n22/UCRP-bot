@@ -4,7 +4,7 @@
  * ULEPSZONY: obsługa nowych przycisków weryfikacji V2 i aplikacji z AI
  */
 
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
 const verificationServiceV2 = require("../services/verificationServiceV2");
 const applicationServiceV2 = require("../services/applicationServiceV2");
 const koloService = require("../services/koloService");
@@ -13,6 +13,7 @@ const ticketService = require("../services/ticketService");
 const { getBoundChannelId } = require("../config/channels");
 const { hasPermission } = require("../config/roles");
 const { logError } = require("../utils/logger");
+const ui = require("../utils/embeds");
 
 module.exports = {
   name: "interactionCreate",
@@ -121,7 +122,7 @@ module.exports = {
       if (interaction.isButton() && interaction.customId.startsWith("verification_accept:")) {
         if (!(await hasPermission(interaction.member, "MODERATE"))) {
           return interaction.reply({
-            content: "❌ Brak uprawnień do rozpatrywania weryfikacji.",
+            embeds: [ui.noPermission("Rozpatrywanie weryfikacji wymaga uprawnienia **MODERATE**.")],
             ephemeral: true,
           });
         }
@@ -132,7 +133,7 @@ module.exports = {
       if (interaction.isButton() && interaction.customId.startsWith("verification_reject:")) {
         if (!(await hasPermission(interaction.member, "MODERATE"))) {
           return interaction.reply({
-            content: "❌ Brak uprawnień do rozpatrywania weryfikacji.",
+            embeds: [ui.noPermission("Rozpatrywanie weryfikacji wymaga uprawnienia **MODERATE**.")],
             ephemeral: true,
           });
         }
@@ -143,7 +144,7 @@ module.exports = {
       if (interaction.isButton() && interaction.customId.startsWith("verification_moreinfo:")) {
         if (!(await hasPermission(interaction.member, "MODERATE"))) {
           return interaction.reply({
-            content: "❌ Brak uprawnień do rozpatrywania weryfikacji.",
+            embeds: [ui.noPermission("Rozpatrywanie weryfikacji wymaga uprawnienia **MODERATE**.")],
             ephemeral: true,
           });
         }
@@ -163,7 +164,7 @@ module.exports = {
       if (interaction.isButton() && (interaction.customId.startsWith("application_accept:") || interaction.customId.startsWith("application_reject:"))) {
         if (!(await hasPermission(interaction.member, "REVIEW_APPLICATIONS"))) {
           return interaction.reply({
-            content: "❌ Brak uprawnień do rozpatrywania podań.",
+            embeds: [ui.noPermission("Rozpatrywanie podań wymaga uprawnienia **REVIEW_APPLICATIONS**.")],
             ephemeral: true,
           });
         }
@@ -195,23 +196,36 @@ module.exports = {
           await interaction.update({ components: [disabledRow] });
 
           await interaction.followUp({
-            content: `${decision === "ACCEPTED" ? "✅ Podanie zaakceptowane" : "❌ Podanie odrzucone"} przez <@${interaction.user.id}>.`,
+            embeds: [
+              decision === "ACCEPTED"
+                ? ui.success("Podanie zaakceptowane", `📝 Decyzję podjął <@${interaction.user.id}>.\n\nGratulacje dla kandydata! 🎉`)
+                : ui.error("Podanie odrzucone", `📝 Decyzję podjął <@${interaction.user.id}>.`),
+            ],
           });
 
           const applicant = await interaction.client.users.fetch(application.userId).catch(() => null);
           await applicant
-            ?.send(
-              decision === "ACCEPTED"
-                ? "🎉 Twoje podanie zostało zaakceptowane! Sprawdź swoje role na serwerze."
-                : "Twoje podanie zostało odrzucone. Możesz spróbować ponownie w przyszłości."
-            )
+            ?.send({
+              embeds: [
+                decision === "ACCEPTED"
+                  ? ui.success(
+                      "Podanie zaakceptowane! 🎉",
+                      "Twoje podanie zostało **zaakceptowane**!\n\nSprawdź swoje nowe role na serwerze i powodzenia! 🍀"
+                    )
+                  : ui.base({
+                      title: "Decyzja w sprawie podania",
+                      description: "Twoje podanie zostało **odrzucone**.\n\nNie zniechęcaj się — możesz spróbować ponownie w przyszłości.",
+                      color: ui.COLORS.BURGUNDY,
+                    }),
+              ],
+            })
             .catch(() => null);
         } catch (err) {
           await logError("interactionCreate", "APPLICATION_REVIEW_ERROR", err.message, {
             userId: interaction.user.id,
             applicationId,
           });
-          return interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
+          return ui.replyError(interaction, err.message, "Nie udało się rozpatrzyć podania");
         }
         return;
       }
@@ -227,7 +241,13 @@ module.exports = {
         if (action === "zwolnij") return interaction.showModal(usosCommand.buildHireFireModal("fire"));
         if (action === "napisz") {
           return interaction.reply({
-            content: "Wybierz wykładowcę, do którego chcesz napisać:",
+            embeds: [
+              ui.base({
+                title: "✉️ Napisz do wykładowcy",
+                description: "Wybierz wykładowcę z listy poniżej, a następnie wpisz treść wiadomości.",
+                color: ui.COLORS.BURGUNDY,
+              }),
+            ],
             components: [usosCommand.buildLecturerSelectRow()],
             ephemeral: true,
           });
@@ -300,24 +320,20 @@ module.exports = {
 
         const channelId = await getBoundChannelId("ANNOUNCEMENTS");
         if (!channelId) {
-          return interaction.reply({
-            content: "Kanał ogłoszeń nie jest skonfigurowany w Dashboardzie.",
-            ephemeral: true,
-          });
+          return ui.replyError(interaction, "Kanał ogłoszeń nie jest skonfigurowany w Dashboardzie (klucz **ANNOUNCEMENTS**).", "Brak konfiguracji");
         }
 
-        const embed = new EmbedBuilder()
-          .setTitle(`🏛️ ${tytul}`)
-          .setDescription(tresc)
-          .addFields({ name: "Wydział", value: wydzial })
-          .setColor(0x1a2a6c)
-          .setFooter({ text: `Dziekanat • wystawił: ${interaction.user.tag}` })
-          .setTimestamp();
+        const embed = ui.base({
+          title: `🏛️ ${tytul}`,
+          description: `${tresc}\n\n${ui.DIVIDER}\n🏛️ Wydział: **${wydzial}**\n✍️ Wystawił: <@${interaction.user.id}> (Dziekanat)`,
+          color: ui.COLORS.BRASS,
+          thumbnail: interaction.guild?.iconURL(),
+        });
 
         const channel = await interaction.guild.channels.fetch(channelId);
         await channel.send({ embeds: [embed] });
 
-        return interaction.reply({ content: "✅ Ogłoszenie Dziekanatu opublikowane.", ephemeral: true });
+        return ui.replySuccess(interaction, `Ogłoszenie **${tytul}** opublikowane na <#${channelId}>.`, "Dziekanat");
       }
 
       // ========== REACTION ROLE / AUTOROLE ==========
@@ -333,16 +349,24 @@ module.exports = {
             await Promise.all(roleIds.map((id) => member.roles.add(id)));
           }
           return interaction.reply({
-            content: has ? `➖ Usunięto ${roleIds.length > 1 ? "role" : "rolę"}.` : `➕ Nadano ${roleIds.length > 1 ? "role" : "rolę"}.`,
+            embeds: [
+              has
+                ? ui.base({
+                    title: "➖ Role usunięte",
+                    description: roleIds.map((id) => `<@&${id}>`).join(" "),
+                    color: ui.COLORS.BURGUNDY,
+                  })
+                : ui.success("Nadano role", roleIds.map((id) => `<@&${id}>`).join(" ")),
+            ],
             ephemeral: true,
           });
         } catch (err) {
           await logError("interactionCreate", "REACTION_ROLE_ERROR", err.message, { roleIds: roleIds.join(",") });
-          return interaction.reply({
-            content:
-              "❌ Nie udało się zmienić roli/ról. Najczęstsza przyczyna: rola bota na serwerze jest ustawiona NIŻEJ niż któraś z tych ról.",
-            ephemeral: true,
-          });
+          return ui.replyError(
+            interaction,
+            "Najczęstsza przyczyna: rola bota na serwerze jest ustawiona **NIŻEJ** niż któraś z tych ról. Zgłoś to administracji.",
+            "Nie udało się zmienić ról"
+          );
         }
       }
     } catch (err) {
@@ -351,7 +375,7 @@ module.exports = {
         stack: err.stack,
       });
       const payload = {
-        content: "❌ Wystąpił błąd podczas przetwarzania interakcji.",
+        embeds: [ui.error("Coś poszło nie tak", "Wystąpił błąd podczas przetwarzania interakcji. Spróbuj ponownie, a jeśli problem wróci — zgłoś go administracji.")],
         ephemeral: true,
       };
       if (interaction.deferred || interaction.replied) {

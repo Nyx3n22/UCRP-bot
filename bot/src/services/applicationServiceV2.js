@@ -11,7 +11,6 @@ const { generateAiReply } = require("./aiGatewayService");
 const { getBoundChannelId } = require("../config/channels");
 const { logError, logAction } = require("../utils/logger");
 const {
-  EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
@@ -21,6 +20,7 @@ const {
   AttachmentBuilder,
 } = require("discord.js");
 const { generateBanner } = require("../utils/banner");
+const ui = require("../utils/embeds");
 
 const ROLE_ON_ACCEPT = {
   STUDENT: PERMISSION_KEYS.STUDENT_ROLE,
@@ -143,10 +143,11 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "sentiment": "p
   async sendToReviewChannel(guild, application, aiScore, aiFlags, channel) {
     if (!channel) return;
 
-    const embed = new EmbedBuilder()
-      .setTitle(`📋 Nowe podanie — ${application.type}`)
-      .setColor(aiScore < 0.5 ? 0xff6b6b : aiScore < 0.75 ? 0xffd700 : 0x51cf66)
-      .addFields(
+    const embed = ui.base({
+      title: `📋 Nowe podanie — ${application.type}`,
+      description: `Kandydat: <@${application.userId}>\n\n${ui.DIVIDER}`,
+      color: aiScore < 0.5 ? ui.COLORS.ERROR : aiScore < 0.75 ? ui.COLORS.GOLD : ui.COLORS.SUCCESS,
+      fields: [
         { name: "👤 Kandydat", value: `<@${application.userId}>`, inline: true },
         {
           name: "🤖 AI Score",
@@ -156,8 +157,9 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "sentiment": "p
         {
           name: "📝 Treść",
           value: `\`\`\`\n${JSON.stringify(application.answers, null, 2).substring(0, 500)}...\n\`\`\``,
-        }
-      );
+        },
+      ],
+    });
 
     if (aiFlags.length > 0) {
       embed.addFields({ name: "🚩 Flagi AI", value: aiFlags.join(", ") });
@@ -186,7 +188,7 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "sentiment": "p
       WYKLADOWCA: { title: "📋 Podanie na wykładowcę", desc: "Chcesz dołączyć do kadry akademickiej? Kliknij przycisk, aby złożyć podanie." },
       ADMINISTRACJA: { title: "🛡️ Podanie do administracji", desc: "Chcesz dołączyć do administracji serwera? Kliknij przycisk, aby złożyć podanie." },
     }[type];
-    return new EmbedBuilder().setTitle(labels.title).setDescription(labels.desc).setColor(0x1a2a6c).setTimestamp();
+    return ui.base({ title: labels.title, description: `${labels.desc}\n\n${ui.DIVIDER}\n⏱️ Decyzję podejmuje administracja — powiadomimy Cię na DM.`, color: ui.COLORS.BRASS });
   }
 
   buildPanelRow(type) {

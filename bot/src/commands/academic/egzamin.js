@@ -10,6 +10,7 @@ const examService = require("../../services/examService");
 const { hasPermission } = require("../../config/roles");
 const { getBoundChannelId } = require("../../config/channels");
 const { logError } = require("../../utils/logger");
+const ui = require("../../utils/embeds");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -31,7 +32,7 @@ module.exports = {
     // uruchomić egzamin.
     if (!(await hasPermission(member, "MANAGE_EXAMS"))) {
       return interaction.reply({
-        content: "❌ Nie masz uprawnień do prowadzenia egzaminów.",
+        embeds: [ui.noPermission("Do prowadzenia egzaminów wymagana jest rola kadry z uprawnieniem **MANAGE_EXAMS**.")],
         ephemeral: true,
       });
     }
@@ -65,9 +66,11 @@ module.exports = {
           },
           async ({ studentCount }) => {
             startConfirmed = true;
-            await interaction.editReply(
-              `✅ Egzamin z **${subjectName}** rozpoczęty. Wysłano zaproszenia DM do ${studentCount} studentów. Wyniki pojawią się na kanale wyników po zakończeniu.`
+            const embed = ui.success(
+              "Egzamin rozpoczęty",
+              `📝 **${subjectName}**\n🗂️ Temat: *${topic}*\n\n✉️ Wysłano zaproszenia DM do **${studentCount}** studentów.\n📊 Wyniki pojawią się na kanale wyników po zakończeniu.`
             );
+            await interaction.editReply({ content: null, embeds: [embed] });
           }
         )
         .catch(async (bgErr) => {
@@ -76,11 +79,11 @@ module.exports = {
           // prowadzącemu - późniejsze nie mogą nadpisać sukcesu (i token
           // interakcji i tak już wtedy nie żyje).
           if (!startConfirmed) {
-            await interaction.editReply(`❌ Błąd: ${bgErr.message}`).catch(() => null);
+            await interaction.editReply({ content: null, embeds: [ui.error("Nie udało się rozpocząć egzaminu", bgErr.message)] }).catch(() => null);
           }
         });
     } catch (err) {
-      await interaction.editReply(`❌ Błąd: ${err.message}`);
+      await interaction.editReply({ content: null, embeds: [ui.error("Błąd egzaminu", err.message)] });
     }
   },
 };

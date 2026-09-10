@@ -1,6 +1,7 @@
 const { SlashCommandBuilder } = require("discord.js");
 const retakeService = require("../../services/retakeService");
 const { hasPermission } = require("../../config/roles");
+const ui = require("../../utils/embeds");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -17,7 +18,10 @@ module.exports = {
 
   async execute(interaction) {
     if (!(await hasPermission(interaction.member, "MANAGE_GRADES"))) {
-      return interaction.reply({ content: "❌ Brak uprawnień (wymagany Dziekanat/Administrator USOS).", ephemeral: true });
+      return interaction.reply({
+        embeds: [ui.noPermission("Zgłaszanie warunku wymaga roli Dziekanatu / Administratora USOS (**MANAGE_GRADES**).")],
+        ephemeral: true,
+      });
     }
 
     const student = interaction.options.getUser("student");
@@ -26,11 +30,13 @@ module.exports = {
 
     try {
       const retake = await retakeService.reportRetake(student.id, przedmiot, oplata);
-      return interaction.reply(
-        `📋 Zgłoszono warunek z **${przedmiot}** dla <@${student.id}>. Pobrano opłatę: ${retake.feeIC} IC.`
+      const embed = ui.warning(
+        "Zgłoszono warunek",
+        `📋 **${przedmiot}**\n\n👤 Student: <@${student.id}>\n💰 Pobrano opłatę: **${retake.feeIC} IC**`
       );
+      return interaction.reply({ embeds: [embed] });
     } catch (err) {
-      return interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
+      return ui.replyError(interaction, err.message, "Warunek");
     }
   },
 };

@@ -5,7 +5,7 @@
  * w Dashboardzie (LevelRoleReward). Awans ogłaszany na kanale LEVEL_UP.
  */
 
-const { EmbedBuilder } = require("discord.js");
+const ui = require("../utils/embeds");
 const prisma = require("../lib/prisma");
 const { getBoundChannelId } = require("../config/channels");
 const { logError } = require("../utils/logger");
@@ -90,19 +90,23 @@ class LevelService {
   }
 
   async _handleLevelUp(client, guild, userId, newLevel) {
+    const member = await guild?.members.fetch(userId).catch(() => null);
+    const reward = await prisma.levelRoleReward.findUnique({ where: { level: newLevel } });
+
     const channelId = await getBoundChannelId("LEVEL_UP");
     if (channelId) {
       const channel = await guild?.channels.fetch(channelId).catch(() => null);
-      const embed = new EmbedBuilder()
-        .setDescription(`🎉 <@${userId}> awansował(a) na **poziom ${newLevel}**!`)
-        .setColor(0xf4900c);
+      const embed = ui.base({
+        title: `🎉 Nowy poziom: ${newLevel}!`,
+        description: `<@${userId}> właśnie awansował(a)! Gratulacje! 🥳${reward ? `\n\n🎁 Nagroda: <@&${reward.roleId}>` : ""}`,
+        color: ui.COLORS.LEVEL,
+        thumbnail: member?.user.displayAvatarURL() ?? guild?.iconURL(),
+      });
       await channel?.send({ embeds: [embed] }).catch(() => null);
     }
 
-    const reward = await prisma.levelRoleReward.findUnique({ where: { level: newLevel } });
-    if (reward && guild) {
-      const member = await guild.members.fetch(userId).catch(() => null);
-      await member?.roles.add(reward.roleId).catch(() => null);
+    if (reward && member) {
+      await member.roles.add(reward.roleId).catch(() => null);
     }
   }
 

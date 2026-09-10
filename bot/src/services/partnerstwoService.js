@@ -5,20 +5,22 @@
  * (klucz kanału: PARTNERSTWO_PANEL).
  */
 
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, AttachmentBuilder } = require("discord.js");
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, AttachmentBuilder } = require("discord.js");
 const { generateBanner } = require("../utils/banner");
 const ticketService = require("./ticketService");
 const { generateAiReply } = require("./aiGatewayService");
 const { getRoleIdForPermission } = require("../config/roles");
 const { getBoundChannelId } = require("../config/channels");
 const prisma = require("../lib/prisma");
+const ui = require("../utils/embeds");
 
 class PartnerstwoService {
   buildPanelEmbed() {
-    return new EmbedBuilder()
-      .setTitle("🤝 Partnerstwa i współprace")
-      .setDescription("Reprezentujesz serwer/markę zainteresowaną współpracą? Kliknij przycisk, aby zgłosić propozycję.")
-      .setColor(0xc9a15a).setTimestamp();
+    return ui.base({
+      title: "🤝 Partnerstwa i współprace",
+      description: `Reprezentujesz serwer lub markę zainteresowaną współpracą?\n\nKliknij przycisk poniżej, aby zgłosić propozycję.\n\n${ui.DIVIDER}\n📬 Odpowiadamy na każde zgłoszenie.`,
+      color: ui.COLORS.BRASS,
+    });
   }
 
   buildPanelRow() {
@@ -86,14 +88,16 @@ class PartnerstwoService {
       await getBoundChannelId("TICKET_CATEGORY_PARTNERSTWO")
     );
 
-    const rawEmbed = new EmbedBuilder()
-      .setTitle(`🤝 Zgłoszenie partnerstwa — ${nazwa}`)
-      .addFields(
-        { name: "Zgłaszający", value: `<@${interaction.user.id}>` },
-        { name: "Kontakt", value: kontakt },
-        { name: "Opis (oryginał)", value: opis.slice(0, 1024) }
-      )
-      .setColor(0xc9a15a);
+    const rawEmbed = ui.base({
+      title: `🤝 Zgłoszenie partnerstwa — ${nazwa}`,
+      color: ui.COLORS.BRASS,
+      thumbnail: interaction.user.displayAvatarURL(),
+      fields: [
+        { name: "👤 Zgłaszający", value: `<@${interaction.user.id}>`, inline: true },
+        { name: "📬 Kontakt", value: kontakt.slice(0, 1024), inline: true },
+        { name: "📝 Opis (oryginał)", value: opis.slice(0, 1024) },
+      ],
+    });
 
     await channel.send({ embeds: [rawEmbed] });
 
@@ -107,7 +111,7 @@ class PartnerstwoService {
           { isPremium: false }
         );
         await channel.send({
-          embeds: [new EmbedBuilder().setTitle("🤖 Podsumowanie AI").setDescription(summary).setColor(0x1a2a6c)],
+          embeds: [ui.base({ title: "🤖 Podsumowanie AI", description: summary.slice(0, 4000), color: ui.COLORS.INFO })],
         });
       } catch (err) {
         console.error("[partnerstwoService] AI summary błąd:", err.message);
@@ -119,7 +123,7 @@ class PartnerstwoService {
       await channel.send(`<@&${managerRoleId}> — nowe zgłoszenie partnerstwa czeka na rozpatrzenie.`);
     }
 
-    return interaction.editReply(`✅ Zgłoszenie wysłane. Śledź temat na kanale: <#${channel.id}>`);
+    return interaction.editReply({ content: null, embeds: [ui.success("Zgłoszenie wysłane", `🤝 Dziękujemy za propozycję **${nazwa}**!\n\nŚledź temat na kanale: <#${channel.id}>`)] });
   }
 }
 

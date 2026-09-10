@@ -6,6 +6,7 @@
  */
 
 const { getBoundChannelId } = require("../config/channels");
+const ui = require("../utils/embeds");
 
 module.exports = {
   name: "guildMemberAdd",
@@ -25,9 +26,19 @@ module.exports = {
     const verificationChannelId = await getBoundChannelId("VERIFICATION");
     if (verificationChannelId) {
       await member
-        .send(
-          `👋 Witaj na Uniwersytecie Centralnym RP! Przejdź weryfikację na kanale <#${verificationChannelId}>, aby uzyskać dostęp do serwera.`
-        )
+        .send({
+          embeds: [
+            ui.base({
+              title: "👋 Witaj na Uniwersytecie Centralnym RP!",
+              description:
+                `Cieszymy się, że do nas dołączyłeś/aś, <@${member.id}>! 🎓\n\n` +
+                `Aby uzyskać dostęp do serwera, przejdź **weryfikację postaci (IC)** na kanale <#${verificationChannelId}>.\n\n` +
+                `${ui.DIVIDER}\n❓ Masz pytania? Zapytaj na czacie — chętnie pomożemy!`,
+              color: ui.COLORS.BRASS,
+              thumbnail: member.guild.iconURL(),
+            }),
+          ],
+        })
         .catch(() => null); // DM mogą być zablokowane — nie blokujemy dołączenia
     }
   },

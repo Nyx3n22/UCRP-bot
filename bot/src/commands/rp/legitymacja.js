@@ -10,6 +10,7 @@ const { SlashCommandBuilder, AttachmentBuilder } = require("discord.js");
 const { createCanvas, loadImage } = require("@napi-rs/canvas");
 const prisma = require("../../lib/prisma");
 const { isValid } = require("../../utils/legitymacja");
+const ui = require("../../utils/embeds");
 
 function formatDate(date) {
   return date.toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric" });
@@ -37,33 +38,48 @@ module.exports = {
     });
 
     if (!character) {
-      return interaction.reply({ content: "Nie masz jeszcze postaci. Przejdź weryfikację.", ephemeral: true });
+      return interaction.reply({
+        embeds: [ui.info("🪪 Legitymacja studencka", "Nie masz jeszcze postaci.\n\nPrzejdź **weryfikację** na kanale weryfikacyjnym, aby ją założyć.")],
+        ephemeral: true,
+      });
     }
 
     if (character.yearOfStudy === null || character.yearOfStudy === undefined) {
-      return interaction.reply({
-        content: "❌ Legitymacja studencka jest dostępna tylko dla studentów (Twoje konto nie ma przypisanego roku studiów).",
-        ephemeral: true,
-      });
+      return ui.replyError(
+        interaction,
+        "Legitymacja studencka jest dostępna tylko dla **studentów** (Twoje konto nie ma przypisanego roku studiów).",
+        "Brak uprawnień"
+      );
     }
 
     if (!isValid(character.legitValidUntil)) {
       const dateStr = character.legitValidUntil ? formatDate(character.legitValidUntil) : "brak danych";
       return interaction.reply({
-        content:
-          `❌ Twoja legitymacja **straciła ważność** (wygasła: ${dateStr}). ` +
-          "Zgłoś się do Dziekanatu o przedłużenie, zanim wygenerujesz nową kartę.",
+        embeds: [
+          ui.warning(
+            "Legitymacja straciła ważność",
+            `🪪 Twoja legitymacja **wygasła** (${dateStr}).\n\nZgłoś się do **Dziekanatu** o przedłużenie, zanim wygenerujesz nową kartę.`
+          ),
+        ],
         ephemeral: true,
       });
     }
 
     await interaction.deferReply();
+    await interaction.editReply({ embeds: [ui.loading("Generowanie legitymacji…")] });
 
     const avatarUrl = interaction.user.displayAvatarURL({ extension: "png", size: 256 });
     const buffer = await this._renderCard(character, avatarUrl);
     const attachment = new AttachmentBuilder(buffer, { name: "legitymacja.png" });
 
-    await interaction.editReply({ files: [attachment] });
+    const embed = ui.base({
+      title: `🪪 Legitymacja studencka — ${character.firstNameIC} ${character.lastNameIC}`,
+      description: `🏛️ ${character.faculty?.name ?? "Wydział nieprzypisany"}\n🆔 Nr albumu: \`${character.albumNumber}\`\n📅 Ważna do: **${formatDate(character.legitValidUntil)}**`,
+      color: ui.COLORS.BRASS,
+      image: "attachment://legitymacja.png",
+    });
+
+    await interaction.editReply({ content: null, embeds: [embed], files: [attachment] });
   },
 
   async _renderCard(character, avatarUrl) {

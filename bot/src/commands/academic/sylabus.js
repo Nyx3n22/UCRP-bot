@@ -4,8 +4,9 @@
  * w Dashboardzie przez administrację/wykładowców.
  */
 
-const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
+const { SlashCommandBuilder } = require("discord.js");
 const prisma = require("../../lib/prisma");
+const ui = require("../../utils/embeds");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -22,24 +23,28 @@ module.exports = {
     });
 
     if (!subject) {
-      return interaction.reply({ content: `Nie znaleziono przedmiotu "${subjectName}".`, ephemeral: true });
+      return interaction.reply({
+        embeds: [ui.warning("Nie znaleziono przedmiotu", `Na uczelni nie ma przedmiotu **${subjectName}**. Sprawdź pisownię i spróbuj ponownie.`)],
+        ephemeral: true,
+      });
     }
     if (!subject.syllabus) {
       return interaction.reply({
-        content: `Sylabus dla "${subject.name}" nie został jeszcze uzupełniony w Dashboardzie.`,
+        embeds: [ui.info("📚 Sylabus w przygotowaniu", `Sylabus dla **${subject.name}** nie został jeszcze uzupełniony.\n\nWykładowca doda go wkrótce w Dashboardzie.`)],
         ephemeral: true,
       });
     }
 
-    const embed = new EmbedBuilder()
-      .setTitle(`📚 Sylabus — ${subject.name}`)
-      .setDescription(subject.syllabus.content.slice(0, 4000))
-      .addFields(
-        { name: "Wydział", value: subject.faculty?.name ?? "—", inline: true },
-        { name: "Punkty ECTS", value: `${subject.ectsPoints}`, inline: true }
-      )
-      .setColor(0x2a52be)
-      .setFooter({ text: `Ostatnia aktualizacja: ${subject.syllabus.updatedAt.toLocaleDateString("pl-PL")}` });
+    const embed = ui.base({
+      title: `📚 Sylabus — ${subject.name}`,
+      description: subject.syllabus.content.slice(0, 3800),
+      color: ui.COLORS.INFO,
+      fields: [
+        { name: "🏛️ Wydział", value: subject.faculty?.name ?? "—", inline: true },
+        { name: "🎓 Punkty ECTS", value: `**${subject.ectsPoints}**`, inline: true },
+        { name: "🕓 Aktualizacja", value: subject.syllabus.updatedAt.toLocaleDateString("pl-PL"), inline: true },
+      ],
+    });
 
     await interaction.reply({ embeds: [embed] });
   },

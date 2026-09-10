@@ -142,6 +142,7 @@ class SocialMediaService {
       if (safeUrl(latest.url)) embed.setURL(latest.url);
     }
 
+    embed.setFooter({ text: "Uniwersytet Centralny RP • Social Media" }).setTimestamp();
     return embed;
   }
 }
