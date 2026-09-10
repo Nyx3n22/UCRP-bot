@@ -6,12 +6,14 @@ import { usePathname } from "next/navigation";
 import SidebarNav from "./SidebarNav";
 import { NAV_SECTIONS } from "./Sidebar";
 import SignOutButton from "./SignOutButton";
+import AppLogo from "./AppLogo";
+import UserAvatar from "./UserAvatar";
 
 /**
  * Mobilny pasek górny + wysuwana szuflada nawigacji.
  * Na desktopie (lg+) ukryty — tam króluje Sidebar.
  */
-export default function TopBar({ userTag }: { userTag: string }) {
+export default function TopBar({ userTag, userImage }: { userTag: string; userImage?: string | null }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
 
@@ -24,7 +26,7 @@ export default function TopBar({ userTag }: { userTag: string }) {
     return () => {
       document.body.style.overflow = "";
     };
-  }, [open ]);
+  }, [open]);
 
   return (
     <>
@@ -39,7 +41,7 @@ export default function TopBar({ userTag }: { userTag: string }) {
           </svg>
         </button>
         <Link href="/" className="flex items-center gap-2.5">
-          <span className="brand-crest !h-9 !w-9 !text-xs">UC</span>
+          <AppLogo size={36} priority />
           <span className="leading-tight">
             <span className="block font-display text-sm tracking-wide">Uniwersytet Centralny</span>
             <span className="block text-[0.58rem] uppercase tracking-[0.22em] text-parchment/40">
@@ -47,8 +49,11 @@ export default function TopBar({ userTag }: { userTag: string }) {
             </span>
           </span>
         </Link>
-        <span className="ml-auto hidden max-w-[10rem] truncate text-xs text-parchment/50 sm:block" title={userTag}>
-          {userTag}
+        <span className="ml-auto flex min-w-0 items-center gap-2">
+          <span className="hidden max-w-[10rem] truncate text-xs text-parchment/50 sm:block" title={userTag}>
+            {userTag}
+          </span>
+          <UserAvatar src={userImage} name={userTag} size={32} />
         </span>
       </header>
 
@@ -65,7 +70,7 @@ export default function TopBar({ userTag }: { userTag: string }) {
         >
           <div className="mb-6 flex items-center justify-between px-2">
             <span className="flex items-center gap-2.5">
-              <span className="brand-crest !h-9 !w-9 !text-xs">UC</span>
+              <AppLogo size={36} />
               <span className="font-display text-sm">Menu</span>
             </span>
             <button
@@ -80,8 +85,11 @@ export default function TopBar({ userTag }: { userTag: string }) {
           </div>
           <SidebarNav sections={NAV_SECTIONS} onNavigate={() => setOpen(false)} />
           <div className="mt-auto flex items-center justify-between gap-2 border-t border-line/60 px-2 pt-4">
-            <span className="truncate text-xs text-parchment/60" title={userTag}>
-              {userTag}
+            <span className="flex min-w-0 items-center gap-2">
+              <UserAvatar src={userImage} name={userTag} size={28} />
+              <span className="truncate text-xs text-parchment/60" title={userTag}>
+                {userTag}
+              </span>
             </span>
             <SignOutButton />
           </div>

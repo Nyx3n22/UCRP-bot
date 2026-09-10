@@ -1,6 +1,8 @@
 import Link from "next/link";
 import SidebarNav, { NavSection } from "./SidebarNav";
 import SignOutButton from "./SignOutButton";
+import AppLogo from "./AppLogo";
+import UserAvatar from "./UserAvatar";
 
 export const NAV_SECTIONS: NavSection[] = [
   {
@@ -47,7 +49,7 @@ export const NAV_SECTIONS: NavSection[] = [
 function BrandMark() {
   return (
     <Link href="/" className="group mb-8 flex items-center gap-3 px-2">
-      <span className="brand-crest">UC</span>
+      <AppLogo size={42} priority />
       <span className="leading-tight">
         <span className="block font-display text-[1.05rem] tracking-wide transition-colors group-hover:text-brasslight">
           Uniwersytet Centralny
@@ -60,8 +62,7 @@ function BrandMark() {
   );
 }
 
-export function SidebarBody({ userTag }: { userTag: string }) {
-  const initial = (userTag.trim()[0] ?? "?").toUpperCase();
+export function SidebarBody({ userTag, userImage }: { userTag: string; userImage?: string | null }) {
   return (
     <>
       <div>
@@ -71,8 +72,8 @@ export function SidebarBody({ userTag }: { userTag: string }) {
 
       <div className="mt-auto pt-6">
         <div className="card glass flex items-center gap-3 p-3">
-          <span className="relative grid h-9 w-9 shrink-0 place-items-center rounded-full border border-brass/40 bg-brass/10 font-display text-sm text-brasslight">
-            {initial}
+          <span className="relative shrink-0">
+            <UserAvatar src={userImage} name={userTag} size={36} />
             <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-panel bg-emerald-400" />
           </span>
           <span className="min-w-0 flex-1 leading-tight">
@@ -90,10 +91,10 @@ export function SidebarBody({ userTag }: { userTag: string }) {
   );
 }
 
-export default function Sidebar({ userTag }: { userTag: string }) {
+export default function Sidebar({ userTag, userImage }: { userTag: string; userImage?: string | null }) {
   return (
     <aside className="sticky top-0 hidden h-screen w-72 shrink-0 flex-col overflow-y-auto border-r border-line/70 bg-gradient-to-b from-[#141828]/90 to-[#0f121d]/90 px-5 py-7 backdrop-blur-md lg:flex">
-      <SidebarBody userTag={userTag} />
+      <SidebarBody userTag={userTag} userImage={userImage} />
     </aside>
   );
 }

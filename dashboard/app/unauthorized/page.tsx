@@ -1,4 +1,5 @@
 import Link from "next/link";
+import AppLogo from "@/components/AppLogo";
 
 type SearchParams = {
   discordId?: string;
@@ -16,7 +17,7 @@ export default function UnauthorizedPage({ searchParams }: { searchParams: Searc
     <div className="flex min-h-screen items-center justify-center px-4 py-10">
       <div className="w-full max-w-2xl">
         <div className="animate-enter mb-6 flex items-center justify-center gap-3">
-          <span className="brand-crest">UC</span>
+          <AppLogo size={42} />
           <span className="leading-tight">
             <span className="block font-display text-lg tracking-wide">Uniwersytet Centralny RP</span>
             <span className="block text-[0.6rem] uppercase tracking-[0.24em] text-parchment/40">

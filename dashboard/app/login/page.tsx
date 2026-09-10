@@ -3,6 +3,7 @@
 import { Suspense, useState } from "react";
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
+import AppLogo from "@/components/AppLogo";
 
 function LoginContent() {
   const searchParams = useSearchParams();
@@ -19,7 +20,7 @@ function LoginContent() {
       />
       <div className="relative w-full max-w-md">
         <div className="animate-enter mb-6 flex items-center justify-center gap-3">
-          <span className="brand-crest animate-glow-pulse !h-12 !w-12 !text-base">UC</span>
+          <AppLogo size={48} priority className="animate-glow-pulse" />
           <span className="leading-tight">
             <span className="block font-display text-lg tracking-wide">Uniwersytet Centralny RP</span>
             <span className="block text-[0.6rem] uppercase tracking-[0.24em] text-parchment/40">
