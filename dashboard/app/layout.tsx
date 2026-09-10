@@ -32,6 +32,10 @@ export const metadata: Metadata = {
     template: "%s — UCRP Dashboard",
   },
   description: "Panel administracyjny bota Discord — Uniwersytet Centralny RP",
+  icons: {
+    icon: "/logo.png",
+    apple: "/logo.png",
+  },
 };
 
 export const viewport: Viewport = {
