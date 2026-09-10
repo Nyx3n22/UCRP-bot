@@ -26,12 +26,14 @@ export default function OptionRow({ option, roles, roleNameById }: { option: Opt
         <td className="font-mono text-xs">{option.discordRoleIds.map((id) => roleNameById[id] ?? id).join(", ")}</td>
         <td>{option.emoji ?? "—"}</td>
         <td>{option.style}</td>
-        <td className="flex gap-2">
-          <button onClick={() => setEditing(true)} className="btn-secondary text-xs">Edytuj</button>
-          <form action={deleteOption}>
-            <input type="hidden" name="id" value={option.id} />
-            <button type="submit" className="btn-danger text-xs">Usuń</button>
-          </form>
+        <td>
+          <div className="flex items-center justify-end gap-2">
+            <button onClick={() => setEditing(true)} className="btn-secondary text-xs">Edytuj</button>
+            <form action={deleteOption}>
+              <input type="hidden" name="id" value={option.id} />
+              <button type="submit" className="btn-danger text-xs">Usuń</button>
+            </form>
+          </div>
         </td>
       </tr>
     );

@@ -25,6 +25,23 @@ interface VerificationAttempt {
   };
 }
 
+const STATUS_BADGES: Record<string, { cls: string; label: string }> = {
+  PENDING_CAPTCHA: { cls: 'badge badge-blue', label: '⏳ Czeka na captchę' },
+  PENDING_ROBLOX: { cls: 'badge badge-blue', label: '⏳ Czeka na Roblox' },
+  PENDING_AI_REVIEW: { cls: 'badge badge-amber', label: '🤖 Analiza AI' },
+  PENDING_MANUAL_REVIEW: { cls: 'badge badge-amber', label: '👤 Przegląd manualny' },
+  VERIFIED: { cls: 'badge badge-green', label: '✅ Zweryfikowana' },
+  REJECTED: { cls: 'badge badge-red', label: '❌ Odrzucona' },
+  EXPIRED: { cls: 'badge badge-gray', label: '⏰ Wygasła' },
+};
+
+const FILTERS = [
+  { id: 'all', label: 'Wszystkie' },
+  { id: 'pending', label: 'Oczekujące' },
+  { id: 'verified', label: 'Zweryfikowane' },
+  { id: 'rejected', label: 'Odrzucone' },
+] as const;
+
 export default function VerificationsPage() {
   const [verifications, setVerifications] = useState<VerificationAttempt[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,6 +49,7 @@ export default function VerificationsPage() {
 
   useEffect(() => {
     fetchVerifications();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
 
   const fetchVerifications = async () => {
@@ -48,95 +66,93 @@ export default function VerificationsPage() {
     }
   };
 
-  const getStatusBadge = (status: string) => {
-    const statusMap = {
-      PENDING_CAPTCHA: { color: 'bg-blue-500', label: '⏳ Czeka na captchę' },
-      PENDING_ROBLOX: { color: 'bg-blue-500', label: '⏳ Czeka na Roblox' },
-      PENDING_AI_REVIEW: { color: 'bg-yellow-500', label: '🤖 Analiza AI' },
-      PENDING_MANUAL_REVIEW: { color: 'bg-yellow-600', label: '👤 Przegląd manualny' },
-      VERIFIED: { color: 'bg-green-500', label: '✅ Zweryfikowana' },
-      REJECTED: { color: 'bg-red-500', label: '❌ Odrzucona' },
-      EXPIRED: { color: 'bg-gray-500', label: '⏰ Wygasła' },
-    };
-    const info = statusMap[status as keyof typeof statusMap] || { color: 'bg-gray-500', label: '?' };
-    return <span className={`${info.color} text-white px-3 py-1 rounded text-sm font-bold`}>{info.label}</span>;
-  };
-
   return (
-    <div className="p-6">
-      <h1 className="text-3xl font-bold mb-6">🔍 Zarządzanie weryfikacjami</h1>
+    <div>
+      <p className="label-eyebrow mb-2">Dane</p>
+      <h1 className="mb-2 font-display text-3xl">Weryfikacje</h1>
+      <p className="mb-8 max-w-2xl text-sm text-parchment/55">
+        Wszystkie próby weryfikacji IC — od captchy, przez analizę AI, po przegląd manualny. Filtr domyślnie
+        pokazuje oczekujące.
+      </p>
 
-      <div className="mb-6 flex gap-2">
-        {(['all', 'pending', 'verified', 'rejected'] as const).map((f) => (
+      <div className="mb-6 flex flex-wrap gap-2">
+        {FILTERS.map((f) => (
           <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`px-4 py-2 rounded font-bold transition ${
-              filter === f ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-            }`}
+            key={f.id}
+            onClick={() => setFilter(f.id)}
+            className={`pill ${filter === f.id ? 'pill-active' : ''}`}
           >
-            {f === 'all' && 'Wszystkie'}
-            {f === 'pending' && 'Oczekujące'}
-            {f === 'verified' && 'Zweryfikowane'}
-            {f === 'rejected' && 'Odrzucone'}
+            {f.label}
           </button>
         ))}
       </div>
 
       {loading ? (
-        <p className="text-gray-400">Ładowanie...</p>
+        <div className="card flex items-center gap-3 p-6 text-sm text-parchment/50">
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-brass/30 border-t-brass" />
+          Ładowanie weryfikacji…
+        </div>
       ) : verifications.length === 0 ? (
-        <p className="text-gray-400">Brak weryfikacji do wyświetlenia</p>
+        <div className="card p-6 text-sm text-parchment/45">Brak weryfikacji do wyświetlenia.</div>
       ) : (
         <div className="space-y-4">
-          {verifications.map((v) => (
-            <div key={v.id} className="bg-gray-800 p-4 rounded-lg border border-gray-700">
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <h3 className="text-lg font-bold">
-                    {v.firstNameIC} {v.lastNameIC}
-                  </h3>
-                  <p className="text-gray-400 text-sm">Discord: &lt;@{v.userId}&gt;</p>
-                  <p className="text-gray-400 text-sm">Roblox: {v.robloxUsername}</p>
-                </div>
-                {getStatusBadge(v.status)}
-              </div>
-
-              <div className="grid grid-cols-2 gap-4 text-sm mb-4">
-                <div>
-                  <span className="text-gray-400">Data urodzenia:</span>
-                  <p className="text-white">{new Date(v.birthDateIC).toLocaleDateString('pl-PL')}</p>
-                </div>
-                <div>
-                  <span className="text-gray-400">Data weryfikacji:</span>
-                  <p className="text-white">{new Date(v.createdAt).toLocaleString('pl-PL')}</p>
-                </div>
-              </div>
-
-              {v.aiScore !== undefined && (
-                <div className="mb-4 bg-gray-900 p-3 rounded">
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-gray-400">Score AI:</span>
-                    <span className={`font-bold ${v.aiScore > 0.8 ? 'text-green-400' : v.aiScore > 0.5 ? 'text-yellow-400' : 'text-red-400'}`}>
-                      {(v.aiScore * 100).toFixed(0)}%
-                    </span>
+          {verifications.map((v) => {
+            const badge = STATUS_BADGES[v.status] ?? { cls: 'badge badge-gray', label: '?' };
+            return (
+              <div key={v.id} className="card p-5">
+                <div className="mb-4 flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="font-display text-lg leading-snug">
+                      {v.firstNameIC} {v.lastNameIC}
+                    </h3>
+                    <p className="text-xs text-parchment/45">
+                      Discord: <span className="font-mono">&lt;@{v.userId}&gt;</span> · Roblox:{' '}
+                      <span className="text-parchment/70">{v.robloxUsername}</span>
+                    </p>
                   </div>
-                  {v.aiFlags && v.aiFlags.length > 0 && (
-                    <div className="text-sm text-red-400">
-                      🚩 {v.aiFlags.join(', ')}
-                    </div>
-                  )}
+                  <span className={badge.cls}>{badge.label}</span>
                 </div>
-              )}
 
-              {v.manualReview && (
-                <div className="text-sm text-gray-400 bg-gray-900 p-3 rounded">
-                  <p className="font-bold mb-1">Decyzja: {v.manualReview.decision === 'APPROVED' ? '✅ Zaakceptowana' : '❌ Odrzucona'}</p>
-                  {v.manualReview.notes && <p>Notatka: {v.manualReview.notes}</p>}
+                <div className="mb-4 grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <p className="text-[0.65rem] uppercase tracking-[0.14em] text-parchment/35">Data urodzenia</p>
+                    <p>{new Date(v.birthDateIC).toLocaleDateString('pl-PL')}</p>
+                  </div>
+                  <div>
+                    <p className="text-[0.65rem] uppercase tracking-[0.14em] text-parchment/35">Data weryfikacji</p>
+                    <p>{new Date(v.createdAt).toLocaleString('pl-PL')}</p>
+                  </div>
                 </div>
-              )}
-            </div>
-          ))}
+
+                {v.aiScore !== undefined && (
+                  <div className="mb-4 rounded-lg border border-line/70 bg-ink/60 p-3">
+                    <div className="mb-1 flex items-center justify-between">
+                      <span className="text-xs text-parchment/50">🤖 Wynik analizy AI</span>
+                      <span
+                        className={
+                          v.aiScore > 0.8 ? 'text-sm font-bold text-green-400' : v.aiScore > 0.5 ? 'text-sm font-bold text-yellow-400' : 'text-sm font-bold text-red-400'
+                        }
+                      >
+                        {(v.aiScore * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                    {v.aiFlags && v.aiFlags.length > 0 && (
+                      <p className="text-xs text-[#eb8ea4]">🚩 {v.aiFlags.join(', ')}</p>
+                    )}
+                  </div>
+                )}
+
+                {v.manualReview && (
+                  <div className="rounded-lg border border-line/70 bg-ink/60 p-3 text-sm">
+                    <p className="mb-1 font-semibold">
+                      Decyzja: {v.manualReview.decision === 'APPROVED' ? '✅ Zaakceptowana' : '❌ Odrzucona'}
+                    </p>
+                    {v.manualReview.notes && <p className="text-parchment/55">Notatka: {v.manualReview.notes}</p>}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

@@ -28,7 +28,7 @@ export default async function ReactionRolesPage() {
       </p>
 
       <details className="card p-4 mb-8 max-w-xl">
-        <summary className="cursor-pointer text-sm text-brass">+ Nowa grupa</summary>
+        <summary className="text-sm text-brass font-semibold">Nowa grupa</summary>
         <form action={createGroup} className="flex flex-col gap-2 mt-3">
           <input name="key" placeholder="Klucz (np. wydzialy)" required />
           <input name="title" placeholder="Tytuł panelu" required />
@@ -52,7 +52,16 @@ export default async function ReactionRolesPage() {
               </form>
             </div>
 
-            <form action={async (formData) => { await publishGroup(formData); }} className="flex items-center gap-2 mb-4">
+            {/* Server Component + <form action> wymaga Server Action. Domknięcie bez
+                "use server" crashowało serializację RSC ("Functions cannot be passed
+                directly to Client Components"). */}
+            <form
+              action={async (formData: FormData) => {
+                "use server";
+                await publishGroup(formData);
+              }}
+              className="flex items-center gap-2 mb-4"
+            >
               <input type="hidden" name="groupId" value={g.id} />
               <select name="channelId" required className="text-sm">
                 <option value="">Wybierz kanał do publikacji...</option>

@@ -8,14 +8,21 @@ export default async function ApplyLayout({ children }: { children: React.ReactN
   if (!session?.user) redirect("/login?callbackUrl=/apply");
 
   return (
-    <div className="min-h-screen max-w-3xl mx-auto px-6 py-10">
-      <header className="mb-10 flex justify-between items-center">
-        <Link href="/apply">
-          <p className="label-eyebrow">Uniwersytet Centralny RP</p>
-          <h1 className="font-display text-2xl">Podania rekrutacyjne</h1>
+    <div className="mx-auto min-h-screen max-w-3xl px-6 py-10">
+      <header className="mb-10 flex items-center justify-between gap-4 border-b border-line/70 pb-6">
+        <Link href="/apply" className="group flex items-center gap-3">
+          <span className="brand-crest">UC</span>
+          <span className="leading-tight">
+            <span className="label-eyebrow block">Uniwersytet Centralny RP</span>
+            <span className="block font-display text-xl transition-colors group-hover:text-brasslight">
+              Podania rekrutacyjne
+            </span>
+          </span>
         </Link>
-        <div className="text-right text-xs text-parchment/50">
-          Zalogowano jako<br /><span className="text-parchment/80">{session.user.name}</span>
+        <div className="text-right text-xs text-parchment/40">
+          Zalogowano jako
+          <br />
+          <span className="text-parchment/75">{session.user.name}</span>
         </div>
       </header>
       {children}

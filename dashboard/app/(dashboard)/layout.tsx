@@ -28,9 +28,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
   }
 
   return (
-    <div className="flex">
+    <div className="flex min-h-screen items-stretch">
       <Sidebar userTag={session.user.name ?? "Nieznany"} />
-      <main className="flex-1 p-10">{children}</main>
+      <main className="min-w-0 flex-1 px-8 py-10 lg:px-12">
+        <div className="mx-auto w-full max-w-6xl">{children}</div>
+      </main>
     </div>
   );
 }
