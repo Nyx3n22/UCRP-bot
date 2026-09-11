@@ -72,6 +72,17 @@ function matches(row, where = {}) {
   });
 }
 
+// Domyślne wartości pól z @default w schema.prisma - Prisma stosuje je przy
+// create, a bez nich np. KoloInvite.status wyszedłby null (kod polega na tym,
+// że create bez statusu daje PENDING - patrz _inviteCore).
+const SCHEMA_DEFAULTS = {
+  koloInvite: { status: "PENDING" },
+  koloMember: { role: "MEMBER", consentGiven: false },
+  research: { status: "PENDING_REVIEW", isCustomTopic: false },
+  koloChangeRequest: { status: "PENDING_REVIEW" },
+  kolo: { status: "PENDING_MEMBERS" },
+};
+
 function makeModel(name) {
   const table = () => db[name];
   return {
@@ -110,7 +121,7 @@ function makeModel(name) {
     },
     count: async ({ where } = {}) => table().filter((r) => matches(r, where)).length,
     create: async ({ data }) => {
-      const row = { id: data.id || uid(), ...data, createdAt: new Date() };
+      const row = { id: data.id || uid(), ...(SCHEMA_DEFAULTS[name] || {}), ...data, createdAt: new Date() };
       table().push(row);
       return { ...row };
     },
@@ -856,4 +867,55 @@ test("router: każdy customId panelu trafia do właściwego handlera (integracja
   i = fakeTypedInteraction("button", "kolo_panel_confirm:leave:kolo1", { user: { id: "member2", tag: "member#2" } });
   await router.execute(i);
   assert.equal(db.koloMember.some((m) => m.userId === "member2"), false, "confirm leave: członek wypisany");
+});
+
+test("router: ścieżki zaproszeń, zgody i menu zarządzania (customId z wieloma częściami)", async () => {
+  const router = require("../src/events/interactionCreate");
+
+  // --- kolo_invite_accept:<inviteId> (2 części) -> przyjęcie zaproszenia ---
+  resetDb({ status: "ACTIVE", roleIdDivider: "roleD", roleIdMember: "roleM" });
+  db.koloMember.push({ id: "m1", koloId: "kolo1", userId: "leader1", role: "LEADER", consentGiven: true });
+  db.koloInvite.push({ id: "inv1", koloId: "kolo1", userId: "userA", status: "PENDING", expiresAt: new Date(Date.now() + 3600_000) });
+
+  let i = fakeTypedInteraction("button", "kolo_invite_accept:inv1", { user: { id: "userA", tag: "userA#1" } });
+  await router.execute(i);
+  assert.equal(db.koloInvite[0].status, "ACCEPTED", "invite_accept: zaproszenie przyjęte");
+  assert.equal(db.koloMember.some((m) => m.userId === "userA"), true, "invite_accept: wpis członka utworzony");
+
+  // --- kolo_invite_decline:<inviteId> -> odrzucenie ---
+  db.koloInvite.push({ id: "inv2", koloId: "kolo1", userId: "userB", status: "PENDING", expiresAt: new Date(Date.now() + 3600_000) });
+  i = fakeTypedInteraction("button", "kolo_invite_decline:inv2", { user: { id: "userB", tag: "userB#1" } });
+  await router.execute(i);
+  assert.equal(db.koloInvite.find((x) => x.id === "inv2").status, "DECLINED", "invite_decline: odrzucone");
+
+  // --- kolo_consent:<koloId>:<userId> (3 części) -> nadanie ról ---
+  db.koloMember.push({ id: "m9", koloId: "kolo1", userId: "userC", role: "MEMBER", consentGiven: false });
+  i = fakeTypedInteraction("button", "kolo_consent:kolo1:userC", { user: { id: "userC", tag: "userC#1" } });
+  await router.execute(i);
+  assert.equal(db.koloMember.find((m) => m.userId === "userC").consentGiven, true, "consent: zgoda zapisana (parsowanie 3 części działa)");
+
+  // --- kolo_manage_target:invite:<koloId> (3 części) -> zaproszenie z panelu ---
+  sentMessages.length = 0;
+  i = fakeTypedInteraction("userSelect", "kolo_manage_target:invite:kolo1", { values: ["userD"] });
+  await router.execute(i);
+  assert.ok(db.koloInvite.some((x) => x.userId === "userD" && x.status === "PENDING"), "manage_target invite: zaproszenie utworzone");
+
+  // --- kolo_modal_startresearch:<koloId> (modal) -> start badania ---
+  db.koloMember.push(
+    { id: "mx1", koloId: "kolo1", userId: "m2", role: "MEMBER", consentGiven: true },
+    { id: "mx2", koloId: "kolo1", userId: "m3", role: "MEMBER", consentGiven: true }
+  );
+  const researchBefore = db.research.length;
+  i = fakeTypedInteraction("modal", "kolo_modal_startresearch:kolo1", {
+    fields: { getTextInputValue: () => "temat z listy" },
+  });
+  await router.execute(i);
+  assert.equal(db.research.length, researchBefore + 1, "modal startresearch: badanie utworzone");
+
+  // --- kolo_research_pick:dm_pick:<koloId> (select z panelu DM) -> akcje badania ---
+  i = fakeTypedInteraction("stringSelect", "kolo_research_pick:dm_pick:kolo1", { values: [db.research[0].id] });
+  await router.execute(i);
+  assert.ok(i.state.edits.length, "dm_pick: pokazano akcje badania");
+  const dmPick = JSON.stringify(i.state.edits[0]);
+  assert.ok(dmPick.includes("kolo_research_action:complete:"), "dm_pick: przycisk Zakończ obecny");
 });
