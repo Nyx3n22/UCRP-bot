@@ -69,6 +69,37 @@ module.exports = {
         const [, koloId, userId] = interaction.customId.split(":");
         return koloService.handleConsentButton(interaction, koloId, userId);
       }
+      // panel DM: drugi krok akcji niszczących (wycofaj/rozwiąż/opuść).
+      // MUSI być przed generycznym "kolo_panel_" - inaczej tamta gałąź
+      // połknęłaby ten customId i sparsowała akcję jako "withdraw".
+      if (interaction.isButton() && interaction.customId.startsWith("kolo_panel_confirm:")) {
+        const [, action, koloId] = interaction.customId.split(":");
+        return koloService.handlePanelConfirm(interaction, action, koloId);
+      }
+      // panel DM: rozpoczęcie badania. showModal() musi być PIERWSZĄ
+      // odpowiedzią, więc ta gałąź nie może iść przez handlePanelButton
+      // (ten robi deferUpdate, po którym modala już się nie otworzy).
+      if (interaction.isButton() && interaction.customId.startsWith("kolo_panel_startresearch:")) {
+        return interaction.showModal(koloService.buildStartResearchModal(interaction.customId.split(":")[1]));
+      }
+      // panel DM: przyciski zarządu i członków (kolo_panel_akcja:koloId)
+      if (interaction.isButton() && interaction.customId.startsWith("kolo_panel_")) {
+        const [, action, koloId] = interaction.customId.split(":");
+        return koloService.handlePanelButton(interaction, action, koloId);
+      }
+      // panel DM: cofnięcie konkretnego zaproszenia
+      if (interaction.isStringSelectMenu() && interaction.customId.startsWith("kolo_invite_revoke:")) {
+        return koloService.handleInviteRevokeSelect(interaction, interaction.customId.split(":")[1]);
+      }
+      // panel DM: akcje na konkretnym badaniu (zatrzymaj/wznów/zakończ/przydziel)
+      if (interaction.isButton() && interaction.customId.startsWith("kolo_research_action:")) {
+        const [, action, researchId] = interaction.customId.split(":");
+        return koloService.handleResearchAction(interaction, action, researchId);
+      }
+      // panel DM: przydzielenie osoby do konkretnego badania
+      if (interaction.isUserSelectMenu() && interaction.customId.startsWith("kolo_manage_target:assign_research_direct:")) {
+        return koloService.handleAssignResearchDirect(interaction, interaction.customId.split(":")[2]);
+      }
       // kanał ⚒️zarządzaj-kołem: menu wyboru akcji
       if (interaction.isStringSelectMenu() && interaction.customId === "kolo_manage_select") {
         return koloService.handleManageSelect(interaction);

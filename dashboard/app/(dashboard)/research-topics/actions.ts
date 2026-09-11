@@ -13,6 +13,19 @@ export async function setServerInviteLink(formData: FormData) {
   revalidatePath("/research-topics");
 }
 
+export async function setKoloInactivityDays(formData: FormData) {
+  const raw = Number(formData.get("koloInactivityDays"));
+  // 0 = wymóg aktywności wyłączony; górny limit chroni przed literówką
+  // (np. 3650 dni), która praktycznie wyłączyłaby pilnowanie kół.
+  const days = Number.isFinite(raw) ? Math.min(Math.max(Math.trunc(raw), 0), 365) : 30;
+  await prisma.generalConfig.upsert({
+    where: { id: "singleton" },
+    create: { id: "singleton", koloInactivityDays: days },
+    update: { koloInactivityDays: days },
+  }).catch(() => null);
+  revalidatePath("/research-topics");
+}
+
 export async function createResearchTopic(formData: FormData) {
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return;

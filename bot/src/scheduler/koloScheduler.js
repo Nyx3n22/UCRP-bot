@@ -16,6 +16,9 @@
  *     starszej wersji bota albo po teardownzie przerwanym brakiem dostępu
  *     do serwera Kół. Bez tego taka osoba byłaby na zawsze "w kole",
  *     którego już nie ma (blokada założenia nowego / przyjęcia zaproszenia).
+ *  4) Utrzymanie AKTYWNYCH kół (maintainActiveKola): uprawnienia zarządu na
+ *     serwerze Kół, wymóg aktywności (ostrzeżenie -> rozwiązanie) i
+ *     odświeżenie paneli DM zarządu oraz członków.
  */
 
 const prisma = require("../lib/prisma");
@@ -48,7 +51,7 @@ async function checkExpiredInvites(client) {
     await leader
       ?.send(
         `⌛ Zaproszenie do koła **${invite.kolo.name}** dla <@${invite.userId}> wygasło (72h bez odpowiedzi). ` +
-          "Zaproś kogoś innego komendą `/kolo zaprosz` (działa i przed, i po zatwierdzeniu koła)."
+          "Zaproś kogoś innego przyciskiem 📨 Zaproś osobę na panelu koła (DM) - działa i przed, i po zatwierdzeniu koła."
       )
       .catch(() => null);
 
@@ -99,6 +102,38 @@ async function checkBelowMinimumDissolutions(client) {
 }
 
 /**
+ * Utrzymanie ŻYWYCH kół między tickami:
+ *  1) uprawnienia zarządu na serwerze Kół (lider = admin własnej kategorii,
+ *     wicelider = moderator) - raz na proces dla każdego koła, żeby nadrobić
+ *     też koła założone przed wprowadzeniem tych uprawnień,
+ *  2) wymóg aktywności: ostrzeżenie po GeneralConfig.koloInactivityDays dni
+ *     bezczynności, a 72h po ostrzeżeniu auto-rozwiązanie,
+ *  3) odświeżenie paneli DM (zarząd i członkowie) - panel lidera ma trwałe
+ *     ID w bazie, więc jeśli użytkownik go usunął, zostanie dosłany.
+ */
+async function maintainActiveKola(client) {
+  const kola = await prisma.kolo.findMany({ where: { status: "ACTIVE" } });
+  if (kola.length === 0) return;
+
+  const guild = getKolaGuild(client);
+  for (const kolo of kola) {
+    try {
+      if (guild && !koloService._isPermsApplied(kolo.id)) {
+        await koloService._applyKoloPermissions(guild, kolo);
+      }
+
+      const outcome = await koloService._checkActivityRequirement(client, kolo);
+      // Rozwiązane koło nie ma już członków ani paneli - nie odświeżamy.
+      if (outcome === "dissolved") continue;
+
+      await koloService.refreshPanels(client, kolo.id);
+    } catch (err) {
+      await logError("koloScheduler", "MAINTAIN_KOLO_ERROR", err.message, { koloId: kolo.id, stack: err.stack });
+    }
+  }
+}
+
+/**
  * Jednorazowe/okresowe sprzątanie wpisów, które przeżyły swoje koło:
  * członkowie i wiszące zaproszenia przy kołach REJECTED/DISSOLVED.
  */
@@ -140,6 +175,7 @@ function startKoloScheduler(client) {
       await cleanupOrphanedMemberships(client);
       await checkExpiredInvites(client);
       await checkBelowMinimumDissolutions(client);
+      await maintainActiveKola(client);
     } catch (err) {
       await logError("koloScheduler", "TICK_ERROR", err.message, { stack: err.stack });
     } finally {
@@ -152,4 +188,10 @@ function startKoloScheduler(client) {
 
 // Funkcje sprawdzające są wyeksportowane osobno (poza startKoloScheduler),
 // żeby dało się je wywołać doraźnie/diagnostycznie i przetestować.
-module.exports = { startKoloScheduler, checkExpiredInvites, checkBelowMinimumDissolutions, cleanupOrphanedMemberships };
+module.exports = {
+  startKoloScheduler,
+  checkExpiredInvites,
+  checkBelowMinimumDissolutions,
+  cleanupOrphanedMemberships,
+  maintainActiveKola,
+};

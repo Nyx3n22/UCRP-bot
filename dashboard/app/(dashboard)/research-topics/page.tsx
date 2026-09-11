@@ -1,5 +1,11 @@
 import { prisma } from "@/lib/prisma";
-import { createResearchTopic, toggleResearchTopic, deleteResearchTopic, setServerInviteLink } from "./actions";
+import {
+  createResearchTopic,
+  toggleResearchTopic,
+  deleteResearchTopic,
+  setServerInviteLink,
+  setKoloInactivityDays,
+} from "./actions";
 
 export default async function ResearchTopicsPage() {
   const [topics, generalConfig] = await Promise.all([
@@ -32,6 +38,26 @@ export default async function ResearchTopicsPage() {
       <p className="text-parchment/40 text-xs mb-8 max-w-2xl -mt-6">
         Wysyłany zaproszonym członkom koła w wiadomości z prośbą o potwierdzenie dostępu - Koła Naukowe (kategorie,
         kanały, role) żyją na osobnym serwerze Discord niż reszta bota, więc każdy członek musi tam dołączyć.
+      </p>
+
+      <form action={setKoloInactivityDays} className="card p-4 flex items-center gap-3 mb-8 max-w-xl">
+        <input
+          type="number"
+          name="koloInactivityDays"
+          min={0}
+          max={365}
+          defaultValue={generalConfig?.koloInactivityDays ?? 30}
+          className="w-24"
+        />
+        <button type="submit" className="btn-primary text-xs">
+          Zapisz limit dni
+        </button>
+        <span className="text-parchment/50 text-xs">dni bez aktywności = ostrzeżenie dla koła (0 = wyłączone)</span>
+      </form>
+      <p className="text-parchment/40 text-xs mb-8 max-w-2xl -mt-6">
+        Cel utrzymania koła: aktywne koło musi co tyle dni wykazać aktywność (nowe badanie, ukończone badanie albo nowy
+        członek). Po przekroczeniu limitu zarząd i członkowie dostają ostrzeżenie na DM, a 72h później koło zostaje
+        automatycznie rozwiązane.
       </p>
 
       <form action={createResearchTopic} className="card p-4 flex items-center gap-3 mb-8 max-w-xl">
