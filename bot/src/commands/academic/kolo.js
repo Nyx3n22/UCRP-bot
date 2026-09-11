@@ -45,7 +45,11 @@ module.exports = {
         .setDescription("Rozpoczyna badanie (z listy admina - od razu, lub własny temat - do akceptacji)")
         .addStringOption((o) => o.setName("temat").setDescription("Temat badania").setRequired(true).setAutocomplete(true))
     )
-    .addSubcommand((s) => s.setName("opusc").setDescription("Opuszcza koło (nie dotyczy lidera)"))
+    .addSubcommand((s) =>
+      s
+        .setName("opusc")
+        .setDescription("Opuszcza koło (lider aktywnego koła nie może; lider zgłoszenia je wycofuje)")
+    )
     .addSubcommandGroup((g) =>
       g
         .setName("badania")
@@ -122,9 +126,10 @@ module.exports = {
     }
 
     if (focused.name === "badanie") {
-      const membership = await prisma.koloMember.findFirst({
-        where: { userId: interaction.user.id, role: { in: ["LEADER", "VICE_LEADER"] } },
-      });
+      // Tylko zarząd AKTYWNEGO koła. _getManagedKolo pomija (i sprząta)
+      // członkostwa z kół odrzuconych/rozwiązanych - po takim kole nie ma
+      // czego podpowiadać, a stary wpis blokował użytkownika.
+      const membership = await koloService._getManagedKolo(interaction.user.id);
       if (!membership) return interaction.respond([]);
       const researches = await prisma.research.findMany({
         where: { koloId: membership.koloId, status: { in: ["ACTIVE", "PAUSED"] } },

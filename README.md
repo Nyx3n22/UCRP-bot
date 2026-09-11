@@ -120,11 +120,30 @@ Wszystkie systemy z sekcji 6 specyfikacji poza Akademikami (usuniętymi na życz
 | 8 | System stypendialny | `scholarshipService.js` | `/stypendium wyplac`, `/stypendium historia` |
 | 9 | Biblioteka akademicka | `libraryService.js` | `/biblioteka wypozycz\|oddaj\|moje` |
 | 10 | Zaliczenia warunkowe | `retakeService.js` | `/warunek zglos` |
-| 11 | Koła naukowe | `circleService.js` | `/kolo utworz\|dolacz\|opusc\|budzet\|status` |
+| 11 | Koła naukowe | `koloService.js` (+ `koloScheduler.js`) | założenie: przycisk na kanale `KOLA_NAUKOWE`; `/kolo zaprosz\|wyrzuc\|prosba\|opusc\|badanie-rozpocznij\|badania lista\|zatrzymaj\|wznow\|przydziel` |
 | 12 | Prace dyplomowe | `thesisService.js` | `/praca zarejestruj\|status\|moja` |
 | 13 | ~~Akademiki~~ | usunięte | — |
 | 14 | Generator Dziekanatu | modal w `commands/admin/dziekanat.js`, obsługa w `interactionCreate.js` | `/dziekanat ogloszenie` |
 | 15 | Kary dyscyplinarne | `punishmentService.js` | `/moderacja kara` |
+
+## Koła naukowe — cykl życia i członkostwo
+
+Koła żyją na **osobnym serwerze Discord** (`KOLA_GUILD_ID`), a zgłoszenie startuje przyciskiem na kanale `KOLA_NAUKOWE` (główny serwer). Statusy koła: `PENDING_MEMBERS` → `PENDING_REVIEW` → `ACTIVE`, oraz końcowe `REJECTED` / `DISSOLVED`.
+
+**Zasada nadrzędna: wpis `KoloMember` znaczy coś TYLKO dopóki koło żyje** (`PENDING_MEMBERS`/`PENDING_REVIEW`/`ACTIVE`). Każdy kod pytający „czy ta osoba jest w kole?” idzie przez `koloService._findLiveMembership()`, które filtruje martwe statusy i przy okazji usuwa z bazy sieroty po kołach odrzuconych/rozwiązanych (dzięki temu nikt nie jest trwale zablokowany przez stary wpis — nie może ani założyć koła, ani przyjąć zaproszenia).
+
+Zamknięcie koła zawsze przechodzi przez `_teardownKolo()` / `_dissolveKolo()`, które **najpierw sprzątają bazę** (status, zwolnienie unikalnej nazwy, usunięcie członków i ich przydziałów do badań, wygaszenie wiszących zaproszeń, zamknięcie otwartych próśb), a dopiero potem — best-effort — usuwają kategorię/kanały/role na serwerze Kół. Brak dostępu do tego serwera nie zatrzymuje już sprzątania członkostw.
+
+| Sytuacja | Efekt |
+|---|---|
+| Zaproszeni odrzucą / zignorują zaproszenia (zgłoszenie bez kompletu) | start licznika `belowMinSince`; 72h na doproszenie kogoś (`/kolo zaprosz`), potem **auto-odrzucenie** zgłoszenia (`REJECTED`) i zwolnienie lidera oraz osób, które zaakceptowały |
+| Admin odrzuca zgłoszenie | `REJECTED`, nazwa zwolniona, członkowie usunięci, DM do każdego z nich |
+| Admin zatwierdza rozwiązanie koła / koło 72h poniżej minimum | `DISSOLVED`, infrastruktura usunięta, członkostwa i przydziały do badań wyczyszczone, DM do każdego |
+| Lider zgłoszenia robi `/kolo opusc` | wycofanie całego zgłoszenia (`REJECTED`), zaproszeni dostają DM |
+| Członek zgłoszenia robi `/kolo opusc` | wypisuje się ze zgłoszenia w `PENDING_MEMBERS` (wcześniej był w nim zablokowany) |
+| Klik w stary DM „Akceptuj” po śmierci koła | zaproszenie wygasa, nikt nie zostaje dopisany |
+
+Limit „jedno koło na osobę” jest egzekwowany na żywych kołach przy zakładaniu, wyborze zapraszanych, wysyłce zaproszenia i akceptacji zaproszenia.
 
 ## Panel `/usos` — architektura
 
