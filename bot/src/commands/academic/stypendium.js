@@ -6,7 +6,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName("stypendium")
     .setDescription("💰 | Sprawdza Twoją historię stypendiów")
-    .addSubcommand((s) => s.setName("historia").setDescription("Twoja historia stypendiów")),
+    .addSubcommand((s) => s.setName("historia").setDescription("🗂️ | Twoja historia stypendiów")),
 
   async execute(interaction) {
     const history = await scholarshipService.history(interaction.user.id);

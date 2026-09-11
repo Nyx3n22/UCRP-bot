@@ -15,19 +15,19 @@ module.exports = {
     .addSubcommand((s) =>
       s
         .setName("zaprosz")
-        .setDescription("Zaprasza osobę do koła")
+        .setDescription("📨 | Zaprasza osobę do koła")
         .addUserOption((o) => o.setName("osoba").setDescription("Kogo zaprosić").setRequired(true))
     )
     .addSubcommand((s) =>
       s
         .setName("wyrzuc")
-        .setDescription("Usuwa osobę z koła")
+        .setDescription("👢 | Usuwa osobę z koła")
         .addUserOption((o) => o.setName("osoba").setDescription("Kogo usunąć").setRequired(true))
     )
     .addSubcommand((s) =>
       s
         .setName("prosba")
-        .setDescription("Wysyła prośbę o zmianę (nazwa/logo/lider) do AI + administracji")
+        .setDescription("🙏 | Wysyła prośbę o zmianę (nazwa/logo/lider) do AI + administracji")
         .addStringOption((o) =>
           o
             .setName("typ")
@@ -42,35 +42,35 @@ module.exports = {
     .addSubcommand((s) =>
       s
         .setName("badanie-rozpocznij")
-        .setDescription("Rozpoczyna badanie (z listy admina - od razu, lub własny temat - do akceptacji)")
+        .setDescription("🧪 | Rozpoczyna badanie (z listy admina - od razu, lub własny temat - do akceptacji)")
         .addStringOption((o) => o.setName("temat").setDescription("Temat badania").setRequired(true).setAutocomplete(true))
     )
     .addSubcommand((s) =>
       s
         .setName("opusc")
-        .setDescription("Opuszcza koło (lider aktywnego koła nie może; lider zgłoszenia je wycofuje)")
+        .setDescription("🚪 | Opuszcza koło (lider aktywnego koła nie może; lider zgłoszenia je wycofuje)")
     )
     .addSubcommandGroup((g) =>
       g
         .setName("badania")
-        .setDescription("Zarządzanie prowadzonymi badaniami")
-        .addSubcommand((s) => s.setName("lista").setDescription("Pokazuje badania koła"))
+        .setDescription("🧬 | Zarządzanie prowadzonymi badaniami")
+        .addSubcommand((s) => s.setName("lista").setDescription("📋 | Pokazuje badania koła"))
         .addSubcommand((s) =>
           s
             .setName("zatrzymaj")
-            .setDescription("Zatrzymuje aktywne badanie")
+            .setDescription("⏸️ | Zatrzymuje aktywne badanie")
             .addStringOption((o) => o.setName("badanie").setDescription("Które badanie").setRequired(true).setAutocomplete(true))
         )
         .addSubcommand((s) =>
           s
             .setName("wznow")
-            .setDescription("Wznawia zatrzymane badanie")
+            .setDescription("▶️ | Wznawia zatrzymane badanie")
             .addStringOption((o) => o.setName("badanie").setDescription("Które badanie").setRequired(true).setAutocomplete(true))
         )
         .addSubcommand((s) =>
           s
             .setName("przydziel")
-            .setDescription("Przydziela osobę z koła do badania")
+            .setDescription("🧑‍🔬 | Przydziela osobę z koła do badania")
             .addStringOption((o) => o.setName("badanie").setDescription("Które badanie").setRequired(true).setAutocomplete(true))
             .addUserOption((o) => o.setName("osoba").setDescription("Kogo przydzielić").setRequired(true))
         )

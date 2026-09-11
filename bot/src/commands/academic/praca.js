@@ -16,14 +16,14 @@ module.exports = {
     .addSubcommand((s) =>
       s
         .setName("zarejestruj")
-        .setDescription("Rejestruje pracę dyplomową")
+        .setDescription("🖊️ | Rejestruje pracę dyplomową")
         .addUserOption((o) => o.setName("promotor").setDescription("Promotor pracy").setRequired(true))
         .addStringOption((o) => o.setName("tytul").setDescription("Tytuł pracy").setRequired(true))
     )
     .addSubcommand((s) =>
       s
         .setName("status")
-        .setDescription("Zmienia status pracy (tylko promotor)")
+        .setDescription("🔄 | Zmienia status pracy (tylko promotor)")
         .addStringOption((o) => o.setName("id").setDescription("ID pracy").setRequired(true))
         .addStringOption((o) =>
           o
@@ -38,7 +38,7 @@ module.exports = {
             )
         )
     )
-    .addSubcommand((s) => s.setName("moja").setDescription("Pokazuje status Twojej pracy")),
+    .addSubcommand((s) => s.setName("moja").setDescription("📌 | Pokazuje status Twojej pracy")),
 
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();

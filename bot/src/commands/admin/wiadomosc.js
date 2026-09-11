@@ -25,13 +25,13 @@ module.exports = {
     .addSubcommand((s) =>
       s
         .setName("tekst")
-        .setDescription("Wysyła zwykłą wiadomość tekstową")
+        .setDescription("💬 | Wysyła zwykłą wiadomość tekstową")
         .addChannelOption((o) => o.setName("kanal").setDescription("Docelowy kanał").setRequired(true))
     )
     .addSubcommand((s) =>
       s
         .setName("embed")
-        .setDescription("Otwiera kreator wiadomości embed (tytuł, opis, kolor, obrazek)")
+        .setDescription("🧱 | Otwiera kreator wiadomości embed (tytuł, opis, kolor, obrazek)")
         .addChannelOption((o) => o.setName("kanal").setDescription("Docelowy kanał").setRequired(true))
     ),
 

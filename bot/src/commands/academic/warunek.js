@@ -10,7 +10,7 @@ module.exports = {
     .addSubcommand((s) =>
       s
         .setName("zglos")
-        .setDescription("Zgłasza powtarzanie przedmiotu i pobiera opłatę IC")
+        .setDescription("💳 | Zgłasza powtarzanie przedmiotu i pobiera opłatę IC")
         .addUserOption((o) => o.setName("student").setDescription("Student").setRequired(true))
         .addStringOption((o) => o.setName("przedmiot").setDescription("Nazwa przedmiotu").setRequired(true))
         .addIntegerOption((o) => o.setName("oplata").setDescription("Opłata IC (domyślnie 300)").setRequired(false))
