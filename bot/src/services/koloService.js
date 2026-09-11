@@ -1837,11 +1837,17 @@ class KoloService {
     return { ACTIVE: "🟢 Aktywne", PAUSED: "⏸️ Zatrzymane", COMPLETED: "✅ Zakończone", REJECTED: "❌ Odrzucone", PENDING_REVIEW: "⏳ Do oceny" }[status] || status;
   }
 
-  async handleResearchPickSelect(interaction, action, koloId, extra) {
+  /**
+   * @param {string} [researchIdOverride] ID badania podane wprost. Konieczne
+   *   dla ścieżki przyciskowej (handleResearchAction) - przycisk NIE ma
+   *   interaction.values, więc bez tego researchId byłoby undefined i każda
+   *   akcja kończyła się "Nie znaleziono badania".
+   */
+  async handleResearchPickSelect(interaction, action, koloId, extra, researchIdOverride = null) {
     await interaction.deferUpdate();
     const managed = await this._requireManager(interaction.user.id, koloId);
     if (!managed) return interaction.editReply({ content: "❌ Musisz być liderem lub wiceliderem tego koła.", components: [] });
-    const researchId = interaction.values[0];
+    const researchId = researchIdOverride || interaction.values[0];
     const research = await prisma.research.findUnique({ where: { id: researchId }, include: { kolo: true } });
     if (!research || research.koloId !== koloId) return interaction.editReply({ content: "❌ Nie znaleziono badania.", components: [] });
 
@@ -1939,11 +1945,12 @@ class KoloService {
       const managed = await this._requireManager(interaction.user.id, research.koloId);
       if (!managed) return interaction.editReply({ content: "❌ Musisz być liderem lub wiceliderem tego koła.", components: [] });
 
+      // researchId przekazujemy wprost - patrz researchIdOverride.
       if (action === "pause" || action === "resume") {
-        return this.handleResearchPickSelect(interaction, `${action}_research`, research.koloId, null);
+        return this.handleResearchPickSelect(interaction, `${action}_research`, research.koloId, null, researchId);
       }
       if (action === "complete") {
-        return this.handleResearchPickSelect(interaction, "complete_research", research.koloId, null);
+        return this.handleResearchPickSelect(interaction, "complete_research", research.koloId, null, researchId);
       }
       if (action === "assign") {
         const select = new UserSelectMenuBuilder()
@@ -2400,6 +2407,17 @@ class KoloService {
         return interaction.editReply({ content: "❌ To koło już nie istnieje.", embeds: [], components: [] });
       }
 
+      // Wyjście z koła - akcja ZWYKŁEGO członka (przycisk na jego panelu),
+      // więc MUSI być przed sprawdzeniem zarządu. Lidera aktywnego koła i tak
+      // blokuje _leaveCore ("przekaż koło albo rozwiąż").
+      if (action === "leave") {
+        const membership = await prisma.koloMember.findUnique({ where: { koloId_userId: { koloId, userId: interaction.user.id } } });
+        if (!membership) return interaction.editReply({ content: "❌ Nie należysz do tego koła.", embeds: [], components: [] });
+        const result = await this._leaveCore(interaction.client, kolo, membership, interaction.user.id);
+        await this.refreshPanels(interaction.client, koloId);
+        return interaction.editReply({ content: result.message, embeds: [], components: [] });
+      }
+
       // Wycofanie się członka ze zgłoszenia - nie wymaga zarządu.
       if (action === "withdraw_member") {
         const membership = await prisma.koloMember.findUnique({ where: { koloId_userId: { koloId, userId: interaction.user.id } } });
@@ -2447,13 +2465,6 @@ class KoloService {
         return interaction.editReply({ content: message, components: [] });
       }
 
-      if (action === "leave") {
-        const membership = await prisma.koloMember.findUnique({ where: { koloId_userId: { koloId, userId: interaction.user.id } } });
-        if (!membership) return interaction.editReply({ content: "❌ Nie należysz do tego koła.", embeds: [], components: [] });
-        const result = await this._leaveCore(interaction.client, kolo, membership, interaction.user.id);
-        await this.refreshPanels(interaction.client, koloId);
-        return interaction.editReply({ content: result.message, embeds: [], components: [] });
-      }
 
       return interaction.editReply({ content: "❌ Nieznana akcja.", components: [] });
     } catch (err) {

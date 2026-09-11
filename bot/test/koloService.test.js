@@ -770,3 +770,90 @@ test("zamknięcie koła czyści jego panele z pamięci procesu", async () => {
   await koloService.refreshPanels(client, "kolo1");
   assert.equal(sentMessages.length, 0, "po zamknięciu koła nie ma już paneli do odświeżenia");
 });
+
+/**
+ * Interakcja przechodząca przez PRAWDZIWY router (events/interactionCreate).
+ * Router ma try/catch połykający błędy do logError, więc o tym, czy dispatch
+ * zadziałał, świadczą efekty (edytowany panel, wpis w bazie), nie wyjątki.
+ */
+function fakeTypedInteraction(type, customId, over = {}) {
+  const base = fakeInteraction(over);
+  const is = (t) => t === type;
+  return Object.assign(base, {
+    customId,
+    isButton: () => is("button"),
+    isModalSubmit: () => is("modal"),
+    isStringSelectMenu: () => is("stringSelect"),
+    isUserSelectMenu: () => is("userSelect"),
+    isAutocomplete: () => false,
+    isChatInputCommand: () => false,
+    showModal: async (m) => base.state.replies.push({ modal: m }),
+  });
+}
+
+test("router: każdy customId panelu trafia do właściwego handlera (integracja z interactionCreate)", async () => {
+  const router = require("../src/events/interactionCreate");
+  resetDb({ status: "ACTIVE" });
+  db.koloMember.push(
+    { id: "m1", koloId: "kolo1", userId: "leader1", role: "LEADER", consentGiven: true },
+    { id: "m2", koloId: "kolo1", userId: "member1", role: "MEMBER", consentGiven: true }
+  );
+  db.koloInvite.push({ id: "inv1", koloId: "kolo1", userId: "userA", status: "PENDING", expiresAt: new Date(Date.now() + 3600_000) });
+  db.research.push({ id: "r1", koloId: "kolo1", topic: "Badanie A", status: "ACTIVE", isCustomTopic: false });
+
+  // kolo_panel_invite -> followUp z UserSelectMenu do zaproszenia
+  sentMessages.length = 0;
+  let i = fakeTypedInteraction("button", "kolo_panel_invite:kolo1");
+  await router.execute(i);
+  assert.ok(i.state.followUps.length, "invite: router odpowiedział");
+  assert.equal(i.state.edits.filter((e) => e.content === "❌ Błąd serwera. Spróbuj ponownie.").length, 0, "invite: bez błędu routera");
+
+  // kolo_panel_revoke -> followUp z listą zaproszeń do cofnięcia
+  i = fakeTypedInteraction("button", "kolo_panel_revoke:kolo1");
+  await router.execute(i);
+  const revokeFu = i.state.followUps.find((f) => f.components);
+  assert.ok(revokeFu, "revoke: pokazano listę zaproszeń");
+
+  // kolo_panel_research -> followUp z akcjami badań
+  i = fakeTypedInteraction("button", "kolo_panel_research:kolo1");
+  await router.execute(i);
+  assert.ok(i.state.followUps.length, "research: router odpowiedział");
+
+  // kolo_panel_manage -> followUp z menu zarządzania
+  i = fakeTypedInteraction("button", "kolo_panel_manage:kolo1");
+  await router.execute(i);
+  assert.ok(i.state.followUps.length, "manage: router odpowiedział");
+
+  // kolo_panel_startresearch -> otwiera modal (nie panel!)
+  i = fakeTypedInteraction("button", "kolo_panel_startresearch:kolo1");
+  await router.execute(i);
+  assert.ok(i.state.replies.some((r) => r.modal), "startresearch: otwarto modal");
+
+  // kolo_panel_refresh -> odświeża panel zarządu (efekt: DM do lidera)
+  sentMessages.length = 0;
+  i = fakeTypedInteraction("button", "kolo_panel_refresh:kolo1");
+  await router.execute(i);
+  assert.equal(sentMessages.filter((m) => m.to === "leader1").length, 1, "refresh: panel zarządu odświeżony");
+
+  // kolo_panel_refresh_member -> panel członka (efekt: DM do member1)
+  sentMessages.length = 0;
+  i = fakeTypedInteraction("button", "kolo_panel_refresh_member:kolo1", { user: { id: "member1", tag: "member#1" } });
+  await router.execute(i);
+  assert.ok(sentMessages.some((m) => m.to === "member1"), "refresh_member: panel członka odświeżony");
+
+  // kolo_invite_revoke (stringSelect) -> cofnięcie zaproszenia w bazie
+  i = fakeTypedInteraction("stringSelect", "kolo_invite_revoke:kolo1", { values: ["inv1"] });
+  await router.execute(i);
+  assert.equal(db.koloInvite[0].status, "EXPIRED", "revoke select: zaproszenie cofnięte w bazie");
+
+  // kolo_research_action:complete (button) -> badanie zakończone
+  i = fakeTypedInteraction("button", "kolo_research_action:complete:r1");
+  await router.execute(i);
+  assert.equal(db.research[0].status, "COMPLETED", "research action: badanie zakończone");
+
+  // kolo_panel_confirm:leave -> potwierdzenie działa (nie wpada w generyczną gałąź)
+  db.koloMember.push({ id: "m3", koloId: "kolo1", userId: "member2", role: "MEMBER", consentGiven: true });
+  i = fakeTypedInteraction("button", "kolo_panel_confirm:leave:kolo1", { user: { id: "member2", tag: "member#2" } });
+  await router.execute(i);
+  assert.equal(db.koloMember.some((m) => m.userId === "member2"), false, "confirm leave: członek wypisany");
+});

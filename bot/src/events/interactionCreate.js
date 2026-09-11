@@ -82,9 +82,14 @@ module.exports = {
       if (interaction.isButton() && interaction.customId.startsWith("kolo_panel_startresearch:")) {
         return interaction.showModal(koloService.buildStartResearchModal(interaction.customId.split(":")[1]));
       }
-      // panel DM: przyciski zarządu i członków (kolo_panel_akcja:koloId)
+      // panel DM: przyciski zarządu i członków.
+      // CustomId ma format "kolo_panel_<akcja>:<koloId>" (DWIE części), więc
+      // akcji nie da się wyciągnąć przez [, action, koloId] - to by dało
+      // action="kolo1", koloId=undefined i każdy przycisk kończyłby się
+      // "to koło zostało odrzucone". Akcję bierzemy z prefiksu.
       if (interaction.isButton() && interaction.customId.startsWith("kolo_panel_")) {
-        const [, action, koloId] = interaction.customId.split(":");
+        const action = interaction.customId.slice("kolo_panel_".length).split(":")[0];
+        const koloId = interaction.customId.split(":")[1];
         return koloService.handlePanelButton(interaction, action, koloId);
       }
       // panel DM: cofnięcie konkretnego zaproszenia
