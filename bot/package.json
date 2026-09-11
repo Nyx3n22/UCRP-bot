@@ -9,7 +9,7 @@
     "test": "node --test test/*.test.js",
     "prisma:generate": "prisma generate --schema=../prisma/schema.prisma",
     "prisma:migrate": "prisma migrate dev --schema=../prisma/schema.prisma",
-    "prisma:deploy": "prisma migrate deploy --schema=../prisma/schema.prisma"
+    "prisma:push": "prisma db push --schema=../prisma/schema.prisma"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
