@@ -63,6 +63,11 @@ model ChannelBinding {
 model GeneralConfig {
   id               String  @id @default("singleton")
   serverInviteLink String? // link zapraszający na serwer, wysyłany np. w wiadomości zgody na dołączenie do koła
+  // Ile dni bez żadnej aktywności (nowe badanie / ukończone badanie / nowy
+  // członek) wytrzymuje AKTYWNE koło, zanim dostanie ostrzeżenie. Po
+  // ostrzeżeniu ma jeszcze 72h na reakcję, inaczej zostaje rozwiązane
+  // (patrz koloService._checkActivityRequirement). 0 = wymóg wyłączony.
+  koloInactivityDays Int     @default(30)
 }
 
 model AiConfig {
@@ -594,6 +599,18 @@ model Kolo {
   roleIdMember  String? // • Członek Koła Naukowego •
 
   belowMinSince DateTime?    // od kiedy koło jest poniżej wymaganego minimum (start licznika 72h)
+
+  // Panel zarządzania na DM lidera/wiceliderów (jedna żywa wiadomość na koło,
+  // odświeżana w miejscu - patrz koloService._refreshLeaderPanel). Bez tego
+  // bot słałby nową wiadomość przy każdej zmianie i zasypywał skrzynkę.
+  panelMessageId String?
+  // Wymóg aktywności: lastActivityAt to ostatnie "coś się w kole wydarzyło"
+  // (start/ukończenie badania, nowy członek). Gdy koło przekroczy
+  // GeneralConfig.koloInactivityDays bez aktywności, dostaje ostrzeżenie
+  // (inactivityWarnedAt), a 72h po ostrzeżeniu zostaje rozwiązane.
+  lastActivityAt     DateTime?
+  inactivityWarnedAt DateTime?
+
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 

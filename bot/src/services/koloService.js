@@ -1,6 +1,6 @@
 /**
  * services/koloService.js
- * Koła Naukowe — bez komend do zakładania. WAŻNE: infrastruktura koła
+ * Koła Naukowe — bez komend slash. WAŻNE: infrastruktura koła
  * (kategoria, kanały, role) powstaje na INNYM serwerze Discord (drugim)
  * niż reszta bota (weryfikacja, tickety, aplikacje itd. - te zostają na
  * głównym GUILD_ID). ID drugiego serwera: zmienna środowiskowa
@@ -9,22 +9,41 @@
  *
  * Flow:
  *   1) Bot wysyła panel (przycisk) na kanał KOLA_NAUKOWE (główny serwer,
- *      tam gdzie jest społeczność).
+ *      tam gdzie jest społeczność). To JEDYNA droga założenia koła.
  *   2) Kandydat klika -> modal (nazwa, opis, logo) -> wybór min. 3 osób
  *      (User Select Menu) -> zaproszenia DM z Akceptuj/Odrzuć.
- *   3) Gdy WSZYSCY zaproszeni zaakceptują -> AI ocena + wysyłka do
+ *   3) W TRAKCIE oczekiwania na akceptacje lider (i wiceliderzy) mają na DM
+ *      żywy panel z przyciskami: Zaproś • Cofnij zaproszenie • Rozwiąż/
+ *      Wycofaj • Odśwież — patrz _refreshLeaderPanel. Panel to JEDNA
+ *      wiadomość na koło (Kolo.panelMessageId), odświeżana w miejscu po
+ *      każdej zmianie i dosyłana na nowo, gdy użytkownik ją usunie.
+ *   4) Gdy WSZYSCY zaproszeni zaakceptują -> AI ocena + wysyłka do
  *      kanału KOLA_REVIEW (fallback LOG_MOD, główny serwer) z przyciskami
  *      admina.
- *   4) Po akceptacji: na DRUGIM serwerze tworzona jest kategoria + 6
+ *   5) Po akceptacji: na DRUGIM serwerze tworzona jest kategoria + 6
  *      kanałów + 4 role (przedziałka + Lider/Wicelider/Członek). Lider
  *      dostaje rolę od razu; pozostali członkowie dostają DM z linkiem
  *      do drugiego serwera i przyciskiem zgody - role dopiero po
  *      kliknięciu (muszą tam dołączyć, jeśli jeszcze ich nie ma).
- *      Zarządzanie kołem (menu w ⚒️zarządzaj-kołem) odbywa się już
- *      całkowicie na drugim serwerze.
  *
- * Zarządzanie (tylko lider/wicelider): zaproszenia, wyrzucanie, prośby
- * o zmianę (nazwa/logo/lider - też przez AI+admina), badania.
+ * ZARZĄDZANIE — dwie równoważne drogi, obie bez komend slash:
+ *   - kanał ⚒️zarządzaj-kołem na serwerze Kół (menu z akcjami),
+ *   - panel DM lidera/wiceliderów (te same akcje: zaproszenia, wyrzucanie,
+ *     prośby o zmianę nazwy/logo/lidera, badania, rozwiązanie koła).
+ *   Każdy członek koła dostaje na DM swój własny panel: status koła,
+ *   badania, w których uczestniczy, i przycisk "Opuść koło"
+ *   (patrz _refreshMemberPanel).
+ *
+ * UPRAWNIENIA NA SERWERZE KÓŁ: lider jest administratorem własnej
+ * kategorii (kanały, role, wiadomości), wicelider moderatorem - patrz
+ * LEADER_ALLOW / VICE_ALLOW i _applyKoloPermissions. Scheduler dorzuca te
+ * uprawnienia też kołom założonym przed tą zmianą.
+ *
+ * WYMÓG AKTYWNOŚCI: aktywne koło musi co GeneralConfig.koloInactivityDays
+ * dni coś zrobić (nowe badanie, ukończone badanie, nowy członek - każde z
+ * tych woła _noteActivity). Po przekroczeniu limitu lider i członkowie
+ * dostają ostrzeżenie (Kolo.inactivityWarnedAt), a 72h później koło jest
+ * rozwiązywane (patrz _checkActivityRequirement + koloScheduler).
  *
  * Zasady pojemności badań (patrz _capacityRequirementFor):
  *   1 aktywne badanie  -> min. 3 osób w kole
@@ -63,6 +82,7 @@ const {
   UserSelectMenuBuilder,
   StringSelectMenuBuilder,
   AttachmentBuilder,
+  PermissionFlagsBits,
 } = require("discord.js");
 const prisma = require("../lib/prisma");
 const { hasPermission } = require("../config/roles");
@@ -85,10 +105,84 @@ const GRACE_PERIOD_MS = 72 * 60 * 60 * 1000; // 72h
 const RESEARCH_CAPACITY = { 1: 3, 2: 6, 3: 10 }; // ile osób w kole potrzeba na N jednoczesnych badań
 const MAX_CONCURRENT_RESEARCH = 3;
 
+// Wymóg aktywności: tyle czasu ma koło na reakcję po ostrzeżeniu o braku
+// aktywności, zanim koloScheduler je rozwiąże (ten sam rytm 72h co licznik
+// "poniżej minimum" - jedna zasada dla wszystkich automatycznych zamknięć).
+const INACTIVITY_WARNING_GRACE_MS = GRACE_PERIOD_MS;
+// Fallback, gdyby GeneralConfig nie miał jeszcze pola koloInactivityDays
+// (np. baza sprzed migracji) - patrz GeneralConfig.koloInactivityDays.
+const DEFAULT_INACTIVITY_DAYS = 30;
+
+// Uprawnienia zarządu na serwerze Kół (KOLA_GUILD_ID). Lider dostaje pełną
+// administrację WŁASNEJ kategorii (kanały, role, wiadomości), wicelider
+// moderację - bez czekania na administrację serwera. Nadawane przez
+// _applyKoloPermissions (patrz tam dlaczego per-rola, a nie całym obiektem).
+const LEADER_ALLOW = [
+  "ViewChannel",
+  "SendMessages",
+  "SendMessagesInThreads",
+  "CreatePublicThreads",
+  "CreatePrivateThreads",
+  "EmbedLinks",
+  "AttachFiles",
+  "AddReactions",
+  "ReadMessageHistory",
+  "MentionEveryone",
+  "ManageMessages",
+  "ManageThreads",
+  "ManageChannels",
+  "ManageRoles",
+  "ManageWebhooks",
+  "ManageEvents",
+  "ManageGuildExpressions",
+  "ModerateMembers",
+  "KickMembers",
+  "MuteMembers",
+  "DeafenMembers",
+  "MoveMembers",
+  "PrioritySpeaker",
+  "Connect",
+  "Speak",
+  "Stream",
+  "UseVAD",
+  "ChangeNickname",
+];
+const VICE_ALLOW = [
+  "ViewChannel",
+  "SendMessages",
+  "SendMessagesInThreads",
+  "EmbedLinks",
+  "AttachFiles",
+  "AddReactions",
+  "ReadMessageHistory",
+  "ManageMessages",
+  "ManageThreads",
+  "ModerateMembers",
+  "MuteMembers",
+  "DeafenMembers",
+  "MoveMembers",
+  "Connect",
+  "Speak",
+  "Stream",
+  "UseVAD",
+];
+
 // pending[userId] = { name, description, logoUrl } — dane z modala,
 // zanim użytkownik wybierze osoby do zaproszenia (User Select Menu to
 // osobna interakcja, nie da się tego zrobić w jednym kroku modala).
 const pendingApplications = new Map();
+
+// panelMessages["koloId:userId"] = { channelId, messageId } — żywe panele DM
+// (lider/wicelider/członek). Trzymane w pamięci, żeby odświeżenie EDYTOWAŁO
+// istniejącą wiadomość zamiast wysyłać nową przy każdej zmianie w kole.
+// Panel lidera ma dodatkowo trwałe ID w Kolo.panelMessageId (przeżywa
+// restart bota - patrz _sendLeaderPanel).
+const panelMessages = new Map();
+
+// Koła, którym w tym procesie nadano już uprawnienia zarządu na serwerze Kół
+// (patrz _applyKoloPermissions) - bez tego scheduler wołałby Discord API
+// co 15 minut dla każdego koła bez potrzeby.
+const permsAppliedKola = new Set();
 
 class KoloService {
   // ==================== CZŁONKOSTWO (wspólne rdzenie) ====================
@@ -395,13 +489,18 @@ class KoloService {
         await leader
           ?.send(
             `❌ **${interaction.user.tag}** odrzucił(a) zaproszenie do koła **${invite.kolo.name}**. ` +
-              `Użyj \`/kolo zaprosz\`, aby zaprosić kogoś innego.`
+              "Użyj przycisku 📨 Zaproś osobę na panelu koła (DM), aby zaprosić kogoś innego."
           )
           .catch(() => null);
         // Od razu przelicz minimum: jeśli to była ostatnia szansa na komplet
         // (brak wiszących zaproszeń), startuje 72h licznik, po którym
         // zgłoszenie zostanie odrzucone, a członkostwa wyczyszczone.
         await this._checkMinimumMembers(interaction.client, invite.koloId);
+        // Panel zarządu musi przestać pokazywać tę osobę jako "oczekującą" -
+        // bez tego lider widziałby ⏳ przy kimś, kto już odmówił (licznik
+        // belowMinSince nie rusza, dopóki wiszą inne zaproszenia, więc samo
+        // _checkMinimumMembers panelu by nie odświeżyło).
+        await this.refreshPanels(interaction.client, invite.koloId);
         return interaction.editReply({ content: "Odrzucono zaproszenie.", embeds: [], components: [] });
       }
 
@@ -426,13 +525,17 @@ class KoloService {
         create: { koloId: invite.koloId, userId: interaction.user.id, role: "MEMBER" },
       });
 
-      // Zaproszenie do JUŻ AKTYWNEGO koła (z kanału zarządzania): nowy
-      // członek musi jeszcze potwierdzić dostęp DM-em, inaczej nigdy nie
+      // Zaproszenie do JUŻ AKTYWNEGO koła (panel DM / kanał zarządzania):
+      // nowy członek musi jeszcze potwierdzić dostęp DM-em, inaczej nigdy nie
       // dostałby ról na serwerze Kół (stary błąd: accept kończył się
       // tylko wpisem w bazie).
       if (invite.kolo.status === "ACTIVE") {
         await this._sendConsentDm(interaction.client, invite.koloId, interaction.user.id, invite.kolo.name);
         await this._checkMinimumMembers(interaction.client, invite.koloId);
+        // Nowy członek = aktywność koła + odświeżenie paneli u wszystkich
+        // (zarząd widzi nowy stan, nowy członek dostaje swój panel).
+        await this._noteActivity(invite.koloId);
+        await this.refreshPanels(interaction.client, invite.koloId);
         return interaction.editReply({
           content: `✅ Przyjęto zaproszenie do koła **${invite.kolo.name}**. Sprawdź DM z prośbą o potwierdzenie dostępu do kanałów.`,
           embeds: [],
@@ -455,7 +558,7 @@ class KoloService {
           await leader
             ?.send(
               `⚠️ W kole **${invite.kolo.name}** zaakceptowało tylko ${acceptedCount} z wymaganych min. ${MIN_INVITED} osób. ` +
-                `Zaproś brakujące osoby komendą \`/kolo zaprosz\`, żeby zgłoszenie mogło trafić do oceny. ` +
+                "Zaproś brakujące osoby przyciskiem 📨 Zaproś osobę na panelu koła (DM), żeby zgłoszenie mogło trafić do oceny. " +
                 "Masz na to 72h - potem zgłoszenie zostanie automatycznie odrzucone, a wszyscy zwolnieni z koła."
             )
             .catch(() => null);
@@ -465,6 +568,10 @@ class KoloService {
           await this._checkMinimumMembers(interaction.client, invite.koloId);
         }
       }
+
+      // Panel zarządu (i członków zgłoszenia) ma pokazać nowy stan: kto już
+      // zaakceptował, ile brakuje i czy licznik 72h tyka.
+      await this.refreshPanels(interaction.client, invite.koloId);
 
       return interaction.editReply({ content: `✅ Dołączono do koła **${invite.kolo.name}**.`, embeds: [], components: [] });
     } catch (err) {
@@ -512,6 +619,12 @@ class KoloService {
       data: { status: "PENDING_REVIEW", belowMinSince: null },
       include: { members: true },
     });
+
+    // Status zmienił się na PENDING_REVIEW - panele muszą stracić przyciski
+    // "Zaproś/Wycofaj zgłoszenie", bo od teraz decyduje administracja.
+    // MUSI być przed wczesnym returnem poniżej: brak kanału recenzji to
+    // problem administracji, a nie powód, żeby lider miał martwy panel.
+    await this.refreshPanels(client, koloId);
 
     const ai = await this._aiScore(
       "rejestracja_kola",
@@ -741,6 +854,10 @@ class KoloService {
         roleIdLeader: roleLider.id,
         roleIdVice: roleWicelider.id,
         roleIdMember: roleCzlonek.id,
+        // Nowe koło startuje "aktywne" - licznik bezczynności rusza od zera
+        // (patrz _checkActivityRequirement).
+        lastActivityAt: new Date(),
+        inactivityWarnedAt: null,
       },
     });
 
@@ -761,6 +878,28 @@ class KoloService {
     }
 
     await this.postManageEmbed(zarzadzaj, kolo.id);
+
+    // Uprawnienia zarządu na serwerze Kół: lider adminem własnej kategorii,
+    // wicelider moderatorem. Musi być PO zapisie ID ról/kanałów do bazy -
+    // _applyKoloPermissions czyta je z obiektu kolo, więc podajemy świeże.
+    const activated = {
+      ...kolo,
+      categoryId: category.id,
+      channelAnnouncements: ogloszenia.id,
+      channelChat: czat.id,
+      channelResearch: badania.id,
+      channelManage: zarzadzaj.id,
+      channelDocuments: dokumenty.id,
+      channelVoice: vc.id,
+      roleIdLeader: roleLider.id,
+      roleIdVice: roleWicelider.id,
+    };
+    await this._applyKoloPermissions(guild, activated).catch((err) =>
+      logError("koloService", "PERMISSIONS_APPLY_ERROR", err.message, { koloId: kolo.id, stack: err.stack })
+    );
+
+    // Panel DM dla każdego członka koła (zarząd dostaje panel zarządu).
+    await this.refreshPanels(client, kolo.id);
 
     // Baner powitalny to kosmetyka (Canvas) - jego awaria nie może wykładać
     // całej aktywacji, bo skończyłaby się rollbackiem działającego koła.
@@ -824,6 +963,9 @@ class KoloService {
         where: { koloId, userId },
         data: { consentGiven: true, currentRoleId: kolo.roleIdMember },
       });
+
+      // Członek ma już role i dostęp - dostaje swój panel koła na DM.
+      await this._sendMemberPanel(interaction.client, koloId, userId).catch(() => null);
 
       return interaction.editReply({ content: `✅ Gotowe! Masz teraz dostęp do kanałów koła **${kolo.name}**.`, embeds: [], components: [] });
     } catch (err) {
@@ -935,6 +1077,15 @@ class KoloService {
       );
   }
 
+  /**
+   * Modal tematu badania wywoływany z panelu DM. CustomId to ten sam
+   * `kolo_modal_startresearch:{koloId}` co z kanału ⚒️zarządzaj-kołem, więc
+   * obsługa (handleStartResearchModalSubmit) jest wspólna.
+   */
+  buildStartResearchModal(koloId) {
+    return this._buildTextModal(`kolo_modal_startresearch:${koloId}`, "Temat badania", "temat");
+  }
+
   async _sendInfo(interaction, kolo) {
     const [members, researches] = await Promise.all([
       prisma.koloMember.findMany({ where: { koloId: kolo.id } }),
@@ -962,7 +1113,13 @@ class KoloService {
 
   async handleManageTargetSelect(interaction, action, koloId) {
     await interaction.deferUpdate();
-    const managed = await this._requireManager(interaction.user.id, koloId);
+    // Zapraszanie działa też w zgłoszeniu zbierającym członków (lider
+    // doprasza brakujące osoby po odrzutach) - reszta akcji wymaga
+    // zatwierdzonego, aktywnego koła.
+    const managed =
+      action === "invite"
+        ? await this._requireInvitableManager(interaction.user.id, koloId)
+        : await this._requireManager(interaction.user.id, koloId);
     if (!managed) return interaction.editReply({ content: "❌ Musisz być liderem lub wiceliderem tego koła.", components: [] });
     const targetId = interaction.values[0];
     const kolo = managed.kolo;
@@ -975,9 +1132,45 @@ class KoloService {
   }
 
   /**
-   * Wspólny rdzeń zapraszania - używany i przez menu zarządzania, i przez
-   * komendę /kolo zaprosz. Zwraca { ok, message } zamiast odpowiadać na
-   * interakcję, bo oba wołania odpowiadają inaczej (editReply vs reply).
+   * Przydzielenie osoby do KONKRETNEGO badania (przycisk z panelu DM, gdzie
+   * badanie jest już znane - stąd w customId jego ID, a nie ID koła).
+   */
+  async handleAssignResearchDirect(interaction, researchId) {
+    await interaction.deferUpdate();
+    try {
+      const research = await prisma.research.findUnique({ where: { id: researchId }, include: { kolo: true } });
+      if (!research) return interaction.editReply({ content: "❌ Nie znaleziono badania.", components: [] });
+      const managed = await this._requireManager(interaction.user.id, research.koloId);
+      if (!managed) return interaction.editReply({ content: "❌ Musisz być liderem lub wiceliderem tego koła.", components: [] });
+      if (!["ACTIVE", "PAUSED"].includes(research.status)) {
+        return interaction.editReply({ content: "❌ Do tego badania nie można przydzielać (nie jest prowadzone).", components: [] });
+      }
+
+      const targetId = interaction.values[0];
+      const targetMembership = await prisma.koloMember.findUnique({
+        where: { koloId_userId: { koloId: research.koloId, userId: targetId } },
+      });
+      if (!targetMembership) return interaction.editReply({ content: "❌ Ta osoba nie należy do koła.", components: [] });
+      const existing = await prisma.researchMember.findUnique({
+        where: { researchId_userId: { researchId, userId: targetId } },
+      });
+      if (existing) return interaction.editReply({ content: "❌ Ta osoba jest już przydzielona do tego badania.", components: [] });
+
+      await prisma.researchMember.create({ data: { researchId, userId: targetId } });
+      await this._postResearchUpdate(interaction.client, research.kolo, research);
+      await logAction("kolo_research_assigned", interaction.user.id, research.koloId, { researchId, targetId });
+      await this.refreshPanels(interaction.client, research.koloId);
+      return interaction.editReply({ content: `✅ Przydzielono <@${targetId}> do badania **${research.topic}**.`, components: [] });
+    } catch (err) {
+      await logError("koloService", "ASSIGN_RESEARCH_DIRECT_ERROR", err.message, { researchId, stack: err.stack });
+      return interaction.editReply({ content: "❌ Błąd serwera.", components: [] }).catch(() => null);
+    }
+  }
+
+  /**
+   * Wspólny rdzeń zapraszania - używany i przez menu w kanale
+   * ⚒️zarządzaj-kołem, i przez panel na DM. Zwraca { ok, message } zamiast
+   * odpowiadać na interakcję, bo oba wołania odpowiadają inaczej.
    */
   async _inviteCore(client, kolo, targetId, actorUser) {
     const memberCount = await prisma.koloMember.count({ where: { koloId: kolo.id } });
@@ -1009,6 +1202,8 @@ class KoloService {
     // samo wysłanie zaproszenia jeszcze braków nie uzupełniło.
     await this._checkMinimumMembers(client, kolo.id);
     await logAction("kolo_invite_sent", actorUser.id, kolo.id, { targetId });
+    // Panel zarządu ma od razu pokazać nowe oczekujące zaproszenie.
+    await this.refreshPanels(client, kolo.id);
     return { ok: true, message: `✅ Wysłano zaproszenie do <@${targetId}>.` };
   }
 
@@ -1019,8 +1214,8 @@ class KoloService {
 
   /**
    * Wspólny rdzeń wyrzucania. Role zdejmujemy ZAWSZE na serwerze Kół
-   * (getKolaGuild), nie na interaction.guild - komenda /kolo może być
-   * wywołana z głównego serwera, gdzie tych ról nie ma.
+   * (getKolaGuild), nie na interaction.guild - panel DM nie ma w ogóle
+   * kontekstu serwera, a menu zarządzania może być kliknięte zdalnie.
    */
   async _kickCore(client, kolo, targetId) {
     if (targetId === kolo.leaderId) return { ok: false, message: "❌ Nie możesz wyrzucić lidera. Użyj zmiany lidera." };
@@ -1051,7 +1246,13 @@ class KoloService {
 
   async _doKick(interaction, kolo, targetId) {
     const result = await this._kickCore(interaction.client, kolo, targetId);
-    if (result.ok) await logAction("kolo_member_kicked", interaction.user.id, kolo.id, { targetId });
+    if (result.ok) {
+      await logAction("kolo_member_kicked", interaction.user.id, kolo.id, { targetId });
+      // Stan koła się zmienił (mniej osób, możliwe uruchomienie licznika 72h)
+      // - panele zarządu muszą to pokazać. Wyrzucony traci wpis w bazie, więc
+      // refreshPanels przy okazji sprząta jego wpis z mapy paneli.
+      await this.refreshPanels(interaction.client, kolo.id);
+    }
     return interaction.editReply({ content: result.message, components: [] });
   }
 
@@ -1078,6 +1279,10 @@ class KoloService {
     await newMember?.roles.remove(kolo.roleIdMember).catch(() => null);
     await newMember?.roles.add(kolo.roleIdVice).catch(() => null);
     await prisma.koloMember.update({ where: { id: targetMembership.id }, data: { role: "VICE_LEADER", currentRoleId: kolo.roleIdVice } });
+
+    // Nowy wicelider dostaje panel ZARZĄDU, zdegradowany wraca do panelu
+    // członka - refreshPanels rozdziela to sam po roli z bazy.
+    await this.refreshPanels(interaction.client, kolo.id);
 
     return interaction.editReply({ content: `✅ <@${targetId}> jest teraz wiceliderem.`, components: [] });
   }
@@ -1109,7 +1314,7 @@ class KoloService {
 
   /**
    * Wspólny rdzeń próśb o zmianę (AI + zapis + embed do recenzji) -
-   * używany przez modale z menu zarządzania i przez /kolo prosba.
+   * używany przez modale z menu zarządzania (kanał i panel DM).
    */
   async _createChangeRequest(client, kolo, requestedById, type, payload, aiKind, aiDetails, label, valueLabel) {
     const ai = await this._aiScore(aiKind, aiDetails);
@@ -1261,6 +1466,12 @@ class KoloService {
 
       await prisma.koloChangeRequest.update({ where: { id: requestId }, data: { status: "APPROVED" } });
       await logAction("kolo_change_approved", interaction.user.id, kolo.id, { type: request.type, payload: request.payload });
+
+      // Zatwierdzona zmiana (nazwa/logo/lider/nowa rola) musi być widoczna na
+      // panelach DM. Przy zmianie lidera to istotne podwójnie: nowy lider
+      // dostaje panel zarządu, a stary wraca do panelu członka.
+      await this.refreshPanels(interaction.client, kolo.id);
+
       return interaction.editReply({ components: [] });
     } catch (err) {
       await logError("koloService", "CHANGE_REVIEW_ERROR", err.message, { requestId, stack: err.stack });
@@ -1270,13 +1481,29 @@ class KoloService {
 
   // ==================== ROZWIĄZANIE KOŁA ====================
 
+  /**
+   * Rdzeń prośby o rozwiązanie koła (zgoda administracji wymagana).
+   * Zwraca tekst zamiast odpowiadać na interakcję - wołają go i kanał
+   * ⚒️zarządzaj-kołem (_requestDissolve), i panel DM (handlePanelConfirm).
+   */
+  async _dissolveRequestCore(client, kolo, requestedById) {
+    const existing = await prisma.koloChangeRequest.findFirst({
+      where: { koloId: kolo.id, type: "DISSOLVE", status: "PENDING_REVIEW" },
+    });
+    if (existing) return "⏳ Prośba o rozwiązanie tego koła już czeka na decyzję administracji.";
+
+    const request = await prisma.koloChangeRequest.create({
+      data: { koloId: kolo.id, requestedBy: requestedById, type: "DISSOLVE", payload: {} },
+    });
+    await this._postChangeReviewEmbed(client, kolo, "Rozwiązanie koła", "(nieodwracalne)", { score: null }, request.id);
+    await logAction("kolo_dissolve_requested", requestedById, kolo.id, {});
+    return "✅ Prośba o rozwiązanie koła wysłana do administracji.";
+  }
+
   async _requestDissolve(interaction, kolo) {
     await interaction.deferReply({ ephemeral: true });
-    const request = await prisma.koloChangeRequest.create({
-      data: { koloId: kolo.id, requestedBy: interaction.user.id, type: "DISSOLVE", payload: {} },
-    });
-    await this._postChangeReviewEmbed(interaction.client, kolo, "Rozwiązanie koła", "(nieodwracalne)", { score: null }, request.id);
-    return interaction.editReply({ content: "✅ Prośba o rozwiązanie koła wysłana do administracji." });
+    const message = await this._dissolveRequestCore(interaction.client, kolo, interaction.user.id);
+    return interaction.editReply({ content: message });
   }
 
   /**
@@ -1334,6 +1561,15 @@ class KoloService {
       prisma.koloInvite.updateMany({ where: { koloId: kolo.id, status: "PENDING" }, data: { status: "EXPIRED" } }),
       prisma.koloChangeRequest.updateMany({ where: { koloId: kolo.id, status: "PENDING_REVIEW" }, data: { status: "REJECTED" } }),
     ]);
+
+    // 1b) PANELE DM - koła już nie ma, więc jego panele nie będą nigdy
+    //     odświeżane (refreshPanels chodzi tylko po żywych członkach).
+    //     Bez tego wpisy zostawałyby w pamięci procesu na zawsze.
+    //     Kolo.panelMessageId zostaje w bazie celowo: to historia, a martwe
+    //     koło i tak nie jest nigdzie odświeżane.
+    for (const key of [...panelMessages.keys()]) {
+      if (key.startsWith(`${kolo.id}:`)) panelMessages.delete(key);
+    }
 
     // 2) DISCORD - best-effort. Koło w PENDING_MEMBERS/REJECTED nie ma tu
     //    nic (wszystkie ID są null), więc pętle po prostu nic nie robią.
@@ -1456,8 +1692,8 @@ class KoloService {
   }
 
   /**
-   * Wspólny rdzeń rozpoczynania badania - menu zarządzania i komenda
-   * /kolo badanie. Zwraca tekst odpowiedzi.
+   * Wspólny rdzeń rozpoczynania badania - menu zarządzania i panel DM.
+   * Zwraca tekst odpowiedzi.
    */
   async _startResearchCore(client, kolo, requestedById, topicInput) {
     const koloId = kolo.id;
@@ -1488,6 +1724,9 @@ class KoloService {
       });
       await this._postResearchUpdate(client, kolo, research);
       await logAction("kolo_research_started", requestedById, koloId, { researchId: research.id, topic: officialTopic.title });
+      // Nowe badanie = aktywność koła (kasuje licznik bezczynności).
+      await this._noteActivity(koloId);
+      await this.refreshPanels(client, koloId);
       return `✅ Rozpoczęto badanie: **${officialTopic.title}**.`;
     }
 
@@ -1548,7 +1787,13 @@ class KoloService {
         data: approve ? { status: "ACTIVE", startedAt: new Date() } : { status: "REJECTED" },
       });
 
-      if (approve) await this._postResearchUpdate(interaction.client, research.kolo, updated);
+      if (approve) {
+        await this._postResearchUpdate(interaction.client, research.kolo, updated);
+        // Zatwierdzenie własnego tematu to rozpoczęte badanie, czyli aktywność
+        // koła - tak samo jak start badania z oficjalnej listy.
+        await this._noteActivity(research.koloId);
+        await this.refreshPanels(interaction.client, research.koloId);
+      }
 
       const leader = await interaction.client.users.fetch(research.kolo.leaderId).catch(() => null);
       await leader
@@ -1592,11 +1837,17 @@ class KoloService {
     return { ACTIVE: "🟢 Aktywne", PAUSED: "⏸️ Zatrzymane", COMPLETED: "✅ Zakończone", REJECTED: "❌ Odrzucone", PENDING_REVIEW: "⏳ Do oceny" }[status] || status;
   }
 
-  async handleResearchPickSelect(interaction, action, koloId, extra) {
+  /**
+   * @param {string} [researchIdOverride] ID badania podane wprost. Konieczne
+   *   dla ścieżki przyciskowej (handleResearchAction) - przycisk NIE ma
+   *   interaction.values, więc bez tego researchId byłoby undefined i każda
+   *   akcja kończyła się "Nie znaleziono badania".
+   */
+  async handleResearchPickSelect(interaction, action, koloId, extra, researchIdOverride = null) {
     await interaction.deferUpdate();
     const managed = await this._requireManager(interaction.user.id, koloId);
     if (!managed) return interaction.editReply({ content: "❌ Musisz być liderem lub wiceliderem tego koła.", components: [] });
-    const researchId = interaction.values[0];
+    const researchId = researchIdOverride || interaction.values[0];
     const research = await prisma.research.findUnique({ where: { id: researchId }, include: { kolo: true } });
     if (!research || research.koloId !== koloId) return interaction.editReply({ content: "❌ Nie znaleziono badania.", components: [] });
 
@@ -1626,11 +1877,109 @@ class KoloService {
       await this._postResearchUpdate(interaction.client, research.kolo, research);
       return interaction.editReply({ content: `✅ Przydzielono <@${targetId}> do badania **${research.topic}**.`, components: [] });
     }
+
+    if (action === "complete_research") {
+      if (!["ACTIVE", "PAUSED"].includes(research.status)) {
+        return interaction.editReply({ content: "❌ Tylko prowadzone badanie można zakończyć.", components: [] });
+      }
+      const completed = await prisma.research.update({
+        where: { id: researchId },
+        data: { status: "COMPLETED", completedAt: new Date() },
+      });
+      await this._postResearchUpdate(interaction.client, research.kolo, completed);
+      await logAction("kolo_research_completed", interaction.user.id, koloId, { researchId, topic: research.topic });
+      // Ukończone badanie to najmocniejszy dowód aktywności koła.
+      await this._noteActivity(koloId);
+      await this.refreshPanels(interaction.client, koloId);
+      return interaction.editReply({ content: `✅ Badanie **${research.topic}** zakończone.`, components: [] });
+    }
+
+    // Wybór badania z panelu DM: pokazujemy dostępne akcje dla tego badania.
+    if (action === "dm_pick") {
+      const canComplete = ["ACTIVE", "PAUSED"].includes(research.status);
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`kolo_research_action:pause:${researchId}`)
+          .setLabel("Zatrzymaj")
+          .setEmoji("⏸️")
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(research.status !== "ACTIVE"),
+        new ButtonBuilder()
+          .setCustomId(`kolo_research_action:resume:${researchId}`)
+          .setLabel("Wznów")
+          .setEmoji("▶️")
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(research.status !== "PAUSED"),
+        new ButtonBuilder()
+          .setCustomId(`kolo_research_action:complete:${researchId}`)
+          .setLabel("Zakończ")
+          .setEmoji("🏁")
+          .setStyle(ButtonStyle.Success)
+          .setDisabled(!canComplete),
+        new ButtonBuilder()
+          .setCustomId(`kolo_research_action:assign:${researchId}`)
+          .setLabel("Przydziel osobę")
+          .setEmoji("🧑‍🔬")
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(!canComplete)
+      );
+      const assigned = await prisma.researchMember.findMany({ where: { researchId }, select: { userId: true } });
+      return interaction.editReply({
+        content:
+          `**${research.topic}** — ${this._researchStatusLabel(research.status)}\n` +
+          (assigned.length > 0 ? `Przydzieleni: ${assigned.map((m) => `<@${m.userId}>`).join(", ")}` : "_Brak przydzielonych osób._"),
+        components: [row],
+      });
+    }
   }
 
-  // ==================== KOMENDY /kolo ====================
-  // (Te metody woła commands/academic/kolo.js - wcześniej nie istniały,
-  // więc KAŻDY podkomenda /kolo crashowała z TypeError.)
+  /**
+   * Przyciski akcji badania z panelu DM (kolo_research_action:akcja:badanieId).
+   * Te same operacje co w kanale ⚒️zarządzaj-kołem, tylko wywołane z DM.
+   */
+  async handleResearchAction(interaction, action, researchId) {
+    await interaction.deferUpdate();
+    try {
+      const research = await prisma.research.findUnique({ where: { id: researchId }, include: { kolo: true } });
+      if (!research) return interaction.editReply({ content: "❌ Nie znaleziono badania.", components: [] });
+      const managed = await this._requireManager(interaction.user.id, research.koloId);
+      if (!managed) return interaction.editReply({ content: "❌ Musisz być liderem lub wiceliderem tego koła.", components: [] });
+
+      // researchId przekazujemy wprost - patrz researchIdOverride.
+      if (action === "pause" || action === "resume") {
+        return this.handleResearchPickSelect(interaction, `${action}_research`, research.koloId, null, researchId);
+      }
+      if (action === "complete") {
+        return this.handleResearchPickSelect(interaction, "complete_research", research.koloId, null, researchId);
+      }
+      if (action === "assign") {
+        const select = new UserSelectMenuBuilder()
+          .setCustomId(`kolo_manage_target:assign_research_direct:${researchId}`)
+          .setPlaceholder("Kogo przydzielić do badania?")
+          .setMinValues(1)
+          .setMaxValues(1);
+        return interaction.editReply({ content: "Wybierz osobę:", components: [new ActionRowBuilder().addComponents(select)] });
+      }
+      return interaction.editReply({ content: "❌ Nieznana akcja.", components: [] });
+    } catch (err) {
+      await logError("koloService", "RESEARCH_ACTION_ERROR", err.message, { action, researchId, stack: err.stack });
+      return interaction.editReply({ content: "❌ Błąd serwera.", components: [] }).catch(() => null);
+    }
+  }
+
+  // ==================== PANEL NA DM (zarząd + członkowie) ====================
+  //
+  // Komenda /kolo została usunięta - całe zarządzanie kołem odbywa się przez
+  // przyciski na DM albo przez menu w kanale ⚒️zarządzaj-kołem na serwerze
+  // Kół. Obie drogi wołają TE SAME rdzenie (_inviteCore, _kickCore,
+  // _leaveCore, _dissolveRequestCore, _createChangeRequest,
+  // _startResearchCore), więc reguły są identyczne niezależnie od tego,
+  // którędy kliknięto.
+  //
+  // Panel to JEDNA wiadomość na osobę, edytowana w miejscu (nie nowa przy
+  // każdej zmianie): panel lidera trzymany trwale w Kolo.panelMessageId
+  // (przeżywa restart bota, scheduler go odświeża i dosyła, gdy zniknie),
+  // panele pozostałych osób w mapie panelMessages.
 
   /**
    * Koło, do którego można zapraszać: aktywne LUB w trakcie zbierania
@@ -1643,188 +1992,558 @@ class KoloService {
     });
   }
 
-  async cmdInvite(interaction) {
-    await interaction.deferReply({ ephemeral: true });
-    const managed = await this._getInvitableKolo(interaction.user.id);
-    if (!managed) return interaction.editReply({ content: "❌ Musisz być liderem lub wiceliderem koła (aktywnego lub w trakcie zakładania)." });
-    const target = interaction.options.getUser("osoba");
-    if (target.id === interaction.user.id) return interaction.editReply({ content: "❌ Nie możesz zaprosić samego siebie." });
-    if (target.bot) return interaction.editReply({ content: "❌ Nie możesz zaprosić bota." });
-    const result = await this._inviteCore(interaction.client, managed.kolo, target.id, interaction.user);
-    return interaction.editReply({ content: result.message });
+  /** To samo co _requireManager, ale dopuszcza zgłoszenie w PENDING_MEMBERS. */
+  async _requireInvitableManager(userId, koloId) {
+    return this._findLiveMembership(userId, {
+      roles: ["LEADER", "VICE_LEADER"],
+      koloId,
+      statuses: ["ACTIVE", "PENDING_MEMBERS"],
+    });
   }
 
-  async cmdKick(interaction) {
-    await interaction.deferReply({ ephemeral: true });
-    const managed = await this._getManagedKolo(interaction.user.id);
-    if (!managed) return interaction.editReply({ content: "❌ Musisz być liderem lub wiceliderem aktywnego koła." });
-    const target = interaction.options.getUser("osoba");
-    const result = await this._kickCore(interaction.client, managed.kolo, target.id);
-    if (result.ok) await logAction("kolo_member_kicked", interaction.user.id, managed.kolo.id, { targetId: target.id, via: "command" });
-    return interaction.editReply({ content: result.message });
+  _koloStatusLabel(status) {
+    return (
+      {
+        PENDING_MEMBERS: "⏳ Zgłoszenie - zbieranie członków",
+        PENDING_REVIEW: "🧾 Czeka na decyzję administracji",
+        ACTIVE: "🟢 Aktywne",
+        REJECTED: "❌ Odrzucone",
+        DISSOLVED: "💥 Rozwiązane",
+      }[status] || status
+    );
   }
 
-  async cmdChangeRequest(interaction) {
-    await interaction.deferReply({ ephemeral: true });
-    const managed = await this._getManagedKolo(interaction.user.id);
-    if (!managed) return interaction.editReply({ content: "❌ Musisz być liderem lub wiceliderem aktywnego koła." });
-    const kolo = managed.kolo;
-    const type = interaction.options.getString("typ");
-    const wartosc = interaction.options.getString("wartosc").trim();
-    const NL = String.fromCharCode(10); // nowa linia (unikamy escape w szablonie)
-
-    if (type === "NAME") {
-      const taken = await prisma.kolo.findUnique({ where: { name: wartosc } });
-      if (taken) return interaction.editReply({ content: "❌ Koło o tej nazwie już istnieje." });
-      await this._createChangeRequest(
-        interaction.client, kolo, interaction.user.id, "NAME", { newName: wartosc },
-        "zmiana_nazwy", `Koło: ${kolo.name}${NL}Nowa nazwa: ${wartosc}`,
-        "Zmiana nazwy", wartosc
-      );
-    } else if (type === "LOGO") {
-      await this._createChangeRequest(
-        interaction.client, kolo, interaction.user.id, "LOGO", { newLogoUrl: wartosc },
-        "zmiana_logo", `Koło: ${kolo.name}${NL}Nowy link logo: ${wartosc}`,
-        "Zmiana logo", wartosc
-      );
-    } else if (type === "LEADER") {
-      // Akceptujemy mention (<@id>, <@!id>) albo gołe ID.
-      const match = wartosc.match(/^(?:<@!?(\d+)>|(\d+))$/);
-      const newLeaderId = match ? (match[1] || match[2]) : null;
-      if (!newLeaderId) return interaction.editReply({ content: "❌ Podaj nowego lidera jako @wzmiankę lub ID (np. @Janek)." });
-      const targetMembership = await prisma.koloMember.findUnique({ where: { koloId_userId: { koloId: kolo.id, userId: newLeaderId } } });
-      if (!targetMembership) return interaction.editReply({ content: "❌ Nowy lider musi być członkiem koła." });
-      await this._createChangeRequest(
-        interaction.client, kolo, interaction.user.id, "LEADER", { newLeaderId },
-        "zmiana_lidera", `Koło: ${kolo.name}${NL}Obecny lider: ${kolo.leaderId}${NL}Proponowany nowy lider: ${newLeaderId}`,
-        "Zmiana lidera", `<@${newLeaderId}>`
-      );
-    }
-    return interaction.editReply({ content: "✅ Prośba wysłana do administracji." });
+  /** "2 dni" / "5 h" / "40 min" - ile zostało do wygaśnięcia zaproszenia. */
+  _inviteTimeLeft(expiresAt) {
+    const ms = new Date(expiresAt).getTime() - Date.now();
+    if (ms <= 0) return "wygasło";
+    const hours = Math.floor(ms / 3_600_000);
+    if (hours >= 24) return `${Math.floor(hours / 24)} dni`;
+    if (hours >= 1) return `${hours} h`;
+    return `${Math.max(1, Math.round(ms / 60_000))} min`;
   }
 
-  async cmdStartResearch(interaction) {
-    await interaction.deferReply({ ephemeral: true });
-    const managed = await this._getManagedKolo(interaction.user.id);
-    if (!managed) return interaction.editReply({ content: "❌ Musisz być liderem lub wiceliderem aktywnego koła." });
-    const topicInput = interaction.options.getString("temat").trim();
-    const message = await this._startResearchCore(interaction.client, managed.kolo, interaction.user.id, topicInput);
-    return interaction.editReply({ content: message });
-  }
-
-  async cmdManageResearch(interaction) {
-    await interaction.deferReply({ ephemeral: true });
-    const sub = interaction.options.getSubcommand();
-
-    if (sub === "lista") {
-      // Podgląd dla każdego członka aktywnego koła (nie tylko zarządu).
-      const membership = await this._findLiveMembership(interaction.user.id, { statuses: ["ACTIVE"] });
-      if (!membership) {
-        return interaction.editReply({ content: "❌ Nie należysz do żadnego aktywnego koła." });
-      }
-      const researches = await prisma.research.findMany({ where: { koloId: membership.koloId }, orderBy: { createdAt: "desc" } });
-      if (researches.length === 0) return interaction.editReply({ content: `🔬 Koło **${membership.kolo.name}** nie prowadzi obecnie żadnych badań.` });
-      const lines = researches.map((r) => `${this._researchStatusLabel(r.status)} **${r.topic}**${r.isCustomTopic ? " (własny)" : ""}`);
-      const embed = new EmbedBuilder()
-        .setTitle(`🔬 Badania koła ${membership.kolo.name}`)
-        .setDescription(lines.join("\n").slice(0, 4000))
-        .setColor(membership.kolo.colorHex || 0x2b6cb0).setFooter({ text: "Uniwersytet Centralny RP • Koła Naukowe" }).setTimestamp();
-      return interaction.editReply({ embeds: [embed] });
-    }
-
-    const managed = await this._getManagedKolo(interaction.user.id);
-    if (!managed) return interaction.editReply({ content: "❌ Musisz być liderem lub wiceliderem aktywnego koła." });
-    const kolo = managed.kolo;
-    // Autocomplete zwraca ID badania jako value.
-    const researchId = interaction.options.getString("badanie");
-    const research = await prisma.research.findFirst({ where: { id: researchId, koloId: kolo.id } });
-    if (!research) return interaction.editReply({ content: "❌ Nie znaleziono badania (wybierz je z podpowiedzi)." });
-
-    if (sub === "zatrzymaj") {
-      if (research.status !== "ACTIVE") return interaction.editReply({ content: "❌ To badanie nie jest aktywne." });
-      await prisma.research.update({ where: { id: research.id }, data: { status: "PAUSED", pausedAt: new Date() } });
-      await this._postResearchUpdate(interaction.client, kolo, { ...research, status: "PAUSED" });
-      await logAction("kolo_research_paused", interaction.user.id, kolo.id, { researchId: research.id });
-      return interaction.editReply({ content: `⏸️ Badanie **${research.topic}** zatrzymane.` });
-    }
-
-    if (sub === "wznow") {
-      if (research.status !== "PAUSED") return interaction.editReply({ content: "❌ To badanie nie jest zatrzymane." });
-      await prisma.research.update({ where: { id: research.id }, data: { status: "ACTIVE", pausedAt: null } });
-      await this._postResearchUpdate(interaction.client, kolo, { ...research, status: "ACTIVE" });
-      await logAction("kolo_research_resumed", interaction.user.id, kolo.id, { researchId: research.id });
-      return interaction.editReply({ content: `▶️ Badanie **${research.topic}** wznowione.` });
-    }
-
-    if (sub === "przydziel") {
-      if (!["ACTIVE", "PAUSED"].includes(research.status)) {
-        return interaction.editReply({ content: "❌ Do tego badania nie można przydzielać (nie jest prowadzone)." });
-      }
-      const target = interaction.options.getUser("osoba");
-      const targetMembership = await prisma.koloMember.findUnique({ where: { koloId_userId: { koloId: kolo.id, userId: target.id } } });
-      if (!targetMembership) return interaction.editReply({ content: "❌ Ta osoba nie należy do koła." });
-      const existing = await prisma.researchMember.findUnique({ where: { researchId_userId: { researchId: research.id, userId: target.id } } });
-      if (existing) return interaction.editReply({ content: "❌ Ta osoba jest już przydzielona do tego badania." });
-      await prisma.researchMember.create({ data: { researchId: research.id, userId: target.id } });
-      await this._postResearchUpdate(interaction.client, kolo, research);
-      return interaction.editReply({ content: `✅ Przydzielono <@${target.id}> do badania **${research.topic}**.` });
-    }
+  /** Wspólny zestaw danych do panelu (jedno zapytanie mniej na odświeżenie). */
+  async _panelData(koloId) {
+    const [kolo, members, invites, researches] = await Promise.all([
+      prisma.kolo.findUnique({ where: { id: koloId } }),
+      prisma.koloMember.findMany({ where: { koloId } }),
+      prisma.koloInvite.findMany({ where: { koloId }, orderBy: { createdAt: "desc" } }),
+      prisma.research.findMany({ where: { koloId }, orderBy: { createdAt: "desc" }, take: 10 }),
+    ]);
+    return { kolo, members, invites, researches };
   }
 
   /**
-   * /kolo opusc - dobrowolne odejście z koła.
+   * Panel zarządu (lider/wicelider). Treść i przyciski zależą od statusu:
+   *  - PENDING_MEMBERS: czekamy na akceptacje -> zaproś / cofnij zaproszenie /
+   *    wycofaj zgłoszenie (to jest ten panel, który lider widzi "w trakcie
+   *    oczekiwania aż osoby zaakceptują zaproszenie"),
+   *  - PENDING_REVIEW: administracja decyduje -> tylko podgląd,
+   *  - ACTIVE: pełne zarządzanie (to samo menu co w ⚒️zarządzaj-kołem).
+   */
+  async _buildLeaderPanel(koloId) {
+    const { kolo, members, invites, researches } = await this._panelData(koloId);
+    if (!kolo) return null;
+
+    const pending = invites.filter((i) => i.status === "PENDING" && new Date(i.expiresAt) > new Date());
+    const accepted = invites.filter((i) => i.status === "ACCEPTED");
+    const declined = invites.filter((i) => i.status === "DECLINED").length;
+    const expired = invites.filter((i) => i.status === "EXPIRED").length;
+    const minRequired = MIN_INVITED + 1;
+
+    const inviteLines =
+      pending.length > 0
+        ? pending.map((i) => `⏳ <@${i.userId}> — jeszcze ${this._inviteTimeLeft(i.expiresAt)}`).join("\n")
+        : "_Brak oczekujących zaproszeń._";
+
+    const desc = [
+      `**Status:** ${this._koloStatusLabel(kolo.status)}`,
+      `**Członkowie:** ${members.length}/${minRequired} min. (limit ${MAX_MEMBERS})`,
+      "",
+      "**Zaproszenia oczekujące:**",
+      inviteLines,
+      "",
+      `✅ zaakceptowane: **${accepted.length}** • ❌ odrzucone: **${declined}** • ⌛ wygasłe: **${expired}**`,
+    ];
+
+    if (kolo.status === "PENDING_MEMBERS") {
+      const missing = Math.max(0, minRequired - members.length);
+      desc.push(
+        "",
+        missing > 0
+          ? `⚠️ Brakuje **${missing}** osób, żeby zgłoszenie trafiło do oceny. ` +
+              (kolo.belowMinSince
+                ? `Licznik 72h już biegnie — po jego upływie zgłoszenie zostanie automatycznie odrzucone.`
+                : "Dopóki wiszą zaproszenia, licznik 72h nie tyka.")
+          : "✅ Komplet zebrany — zgłoszenie idzie do oceny AI i administracji."
+      );
+    }
+
+    const researchLines = researches
+      .filter((r) => ["ACTIVE", "PAUSED", "PENDING_REVIEW"].includes(r.status))
+      .map((r) => `${this._researchStatusLabel(r.status)} ${r.topic}`);
+    if (researchLines.length > 0) desc.push("", "**Badania:**", ...researchLines.slice(0, 5));
+
+    const embed = new EmbedBuilder()
+      .setTitle(`🔬 Panel koła — ${kolo.name}`.slice(0, 256))
+      .setDescription(desc.join("\n").slice(0, 4000))
+      .setColor(kolo.colorHex || 0x2b6cb0)
+      .setFooter({ text: "Uniwersytet Centralny RP • Koła Naukowe • panel odświeża się sam" })
+      .setTimestamp();
+    if (kolo.logoUrl) embed.setThumbnail(kolo.logoUrl);
+
+    // PENDING_REVIEW: decyduje administracja, więc zarząd nie ma tu nic do
+    // klikania. Przyciski zapraszania NIE mogą zostać - handler
+    // (_requireInvitableManager) dopuszcza tylko ACTIVE/PENDING_MEMBERS,
+    // więc byłyby widoczne, ale martwe (klik zwracałby mylący błąd).
+    const refreshButton = new ButtonBuilder()
+      .setCustomId(`kolo_panel_refresh:${kolo.id}`)
+      .setLabel("Odśwież")
+      .setEmoji("🔄")
+      .setStyle(ButtonStyle.Secondary);
+
+    const rows = [];
+    if (kolo.status === "PENDING_REVIEW") {
+      desc.push("", "🧾 Zgłoszenie jest u administracji - na tym etapie nie można już nic zmieniać.");
+      rows.push(new ActionRowBuilder().addComponents(refreshButton));
+      return { embeds: [embed], components: rows };
+    }
+
+    rows.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`kolo_panel_invite:${kolo.id}`).setLabel("Zaproś osobę").setEmoji("📨").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(`kolo_panel_revoke:${kolo.id}`).setLabel("Cofnij zaproszenie").setEmoji("↩️").setStyle(ButtonStyle.Secondary).setDisabled(pending.length === 0),
+        refreshButton
+      )
+    );
+
+    if (kolo.status === "PENDING_MEMBERS") {
+      rows.push(
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`kolo_panel_confirm:withdraw:${kolo.id}`)
+            .setLabel("Wycofaj zgłoszenie")
+            .setEmoji("🚫")
+            .setStyle(ButtonStyle.Danger)
+        )
+      );
+    } else if (kolo.status === "ACTIVE") {
+      rows.push(
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId(`kolo_panel_manage:${kolo.id}`).setLabel("Zarządzaj kołem").setEmoji("⚒️").setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId(`kolo_panel_research:${kolo.id}`).setLabel("Badania").setEmoji("🔬").setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
+            .setCustomId(`kolo_panel_confirm:dissolve:${kolo.id}`)
+            .setLabel("Rozwiąż koło")
+            .setEmoji("💥")
+            .setStyle(ButtonStyle.Danger)
+        )
+      );
+    }
+
+    return { embeds: [embed], components: rows };
+  }
+
+  /**
+   * Panel zwykłego członka: status koła, badania z jego udziałem i wyjście.
+   * Lider/wicelider dostaje panel zarządu, więc ta wersja jest dla reszty.
+   */
+  async _buildMemberPanel(koloId, userId) {
+    const { kolo, members, researches } = await this._panelData(koloId);
+    if (!kolo) return null;
+
+    const mine = await prisma.researchMember.findMany({ where: { userId, research: { koloId } } });
+    const mineIds = new Set(mine.map((m) => m.researchId));
+    const myResearch = researches.filter((r) => mineIds.has(r.id));
+    const role = members.find((m) => m.userId === userId)?.role || "MEMBER";
+
+    const desc = [
+      `**Status:** ${this._koloStatusLabel(kolo.status)}`,
+      `**Twoja rola:** ${{ LEADER: "👑 Lider", VICE_LEADER: "🥈 Wicelider", MEMBER: "👤 Członek" }[role]}`,
+      `**Członkowie:** ${members.length}`,
+      "",
+      "**Twoje badania:**",
+      myResearch.length > 0
+        ? myResearch.map((r) => `${this._researchStatusLabel(r.status)} ${r.topic}`).join("\n")
+        : "_Nie jesteś przydzielony/a do żadnego badania._",
+    ];
+
+    const embed = new EmbedBuilder()
+      .setTitle(`🔬 Twoje koło — ${kolo.name}`.slice(0, 256))
+      .setDescription(desc.join("\n").slice(0, 4000))
+      .setColor(kolo.colorHex || 0x2b6cb0)
+      .setFooter({ text: "Uniwersytet Centralny RP • Koła Naukowe" })
+      .setTimestamp();
+    if (kolo.logoUrl) embed.setThumbnail(kolo.logoUrl);
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`kolo_panel_refresh_member:${kolo.id}`).setLabel("Odśwież").setEmoji("🔄").setStyle(ButtonStyle.Secondary)
+    );
+    if (kolo.status === "ACTIVE") {
+      row.addComponents(
+        new ButtonBuilder().setCustomId(`kolo_panel_confirm:leave:${kolo.id}`).setLabel("Opuść koło").setEmoji("🚪").setStyle(ButtonStyle.Danger)
+      );
+    } else if (kolo.status === "PENDING_MEMBERS") {
+      row.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`kolo_panel_confirm:withdraw_member:${kolo.id}`)
+          .setLabel("Wycofaj się ze zgłoszenia")
+          .setEmoji("🚪")
+          .setStyle(ButtonStyle.Danger)
+      );
+    }
+
+    return { embeds: [embed], components: [row] };
+  }
+
+  /**
+   * Wyślij/odśwież panel zarządu u jednej osoby. Jedna wiadomość na koło per
+   * osoba: lider ma ID zapisane w bazie (przeżywa restart), pozostali w mapie.
+   * @param {boolean} [opts.forceNew] ignoruj zapisany ID i wyślij nową wiadomość
+   */
+  async _sendLeaderPanel(client, koloId, userId, { forceNew = false } = {}) {
+    const payload = await this._buildLeaderPanel(koloId);
+    if (!payload) return null;
+    const user = await client.users.fetch(userId).catch(() => null);
+    if (!user) return null;
+    const dm = await user.createDM().catch(() => null);
+    if (!dm) return null;
+
+    const key = `${koloId}:${userId}`;
+    const kolo = await prisma.kolo.findUnique({ where: { id: koloId }, select: { leaderId: true, panelMessageId: true } });
+    const isLeader = kolo?.leaderId === userId;
+    const storedId = forceNew ? null : isLeader ? kolo?.panelMessageId : panelMessages.get(key)?.messageId || null;
+
+    if (storedId) {
+      const existing = await dm.messages.fetch(storedId).catch(() => null);
+      if (existing) {
+        await existing.edit(payload).catch(() => null);
+        return existing;
+      }
+    }
+
+    const sent = await dm.send(payload).catch(() => null);
+    if (!sent) return null;
+    if (isLeader) {
+      await prisma.kolo.update({ where: { id: koloId }, data: { panelMessageId: sent.id } }).catch(() => null);
+    } else {
+      panelMessages.set(key, { channelId: dm.id, messageId: sent.id });
+    }
+    return sent;
+  }
+
+  /** Panel członka (albo panel zarządu, jeśli to lider/wicelider). */
+  async _sendMemberPanel(client, koloId, userId) {
+    const membership = await prisma.koloMember.findUnique({ where: { koloId_userId: { koloId, userId } } });
+    if (!membership) return null;
+    if (["LEADER", "VICE_LEADER"].includes(membership.role)) {
+      return this._sendLeaderPanel(client, koloId, userId);
+    }
+
+    const payload = await this._buildMemberPanel(koloId, userId);
+    if (!payload) return null;
+    const user = await client.users.fetch(userId).catch(() => null);
+    if (!user) return null;
+    const dm = await user.createDM().catch(() => null);
+    if (!dm) return null;
+
+    const key = `${koloId}:${userId}`;
+    const storedId = panelMessages.get(key)?.messageId;
+    if (storedId) {
+      const existing = await dm.messages.fetch(storedId).catch(() => null);
+      if (existing) {
+        await existing.edit(payload).catch(() => null);
+        return existing;
+      }
+    }
+    const sent = await dm.send(payload).catch(() => null);
+    if (sent) panelMessages.set(key, { channelId: dm.id, messageId: sent.id });
+    return sent;
+  }
+
+  /**
+   * Odświeża panele WSZYSTKICH członków koła (zarząd dostaje panel zarządu,
+   * reszta panel członka). Wołane po każdej zmianie stanu koła i z schedulera.
+   * Awaria DM jednej osoby (zablokowany bot) nie przerywa reszty.
+   */
+  async refreshPanels(client, koloId) {
+    try {
+      const members = await prisma.koloMember.findMany({ where: { koloId }, select: { userId: true } });
+      const current = new Set(members.map((m) => m.userId));
+      for (const userId of current) {
+        await this._sendMemberPanel(client, koloId, userId).catch(() => null);
+      }
+      // Sprzątanie: wpisy osób, które już w kole nie są (wyszły/wyrzucone),
+      // inaczej mapa rosłaby bez końca przez cały czas działania procesu.
+      for (const key of [...panelMessages.keys()]) {
+        if (!key.startsWith(`${koloId}:`)) continue;
+        if (!current.has(key.split(":")[1])) panelMessages.delete(key);
+      }
+    } catch (err) {
+      await logError("koloService", "PANEL_REFRESH_ERROR", err.message, { koloId, stack: err.stack });
+    }
+  }
+
+  /** Router przycisków panelu DM. */
+  async handlePanelButton(interaction, action, koloId) {
+    await interaction.deferUpdate();
+    try {
+      const kolo = await prisma.kolo.findUnique({ where: { id: koloId } });
+      if (!kolo || DEAD_KOLO_STATUSES.includes(kolo.status)) {
+        return interaction.editReply({
+          content: "❌ To koło zostało odrzucone lub rozwiązane - panel jest nieaktualny.",
+          embeds: [],
+          components: [],
+        });
+      }
+
+      // "Odśwież" NIE może iść przed sprawdzeniem uprawnień: _sendLeaderPanel
+      // sam nie weryfikuje członkostwa, więc każdy znający ID koła mógłby
+      // sobie zamówić panel z listą członków i oczekujących zaproszeń.
+      if (action === "refresh") {
+        const managed = await this._requireInvitableManager(interaction.user.id, koloId);
+        if (!managed) {
+          return interaction.editReply({ content: "❌ Musisz być liderem lub wiceliderem tego koła.", components: [] });
+        }
+        await this._sendLeaderPanel(interaction.client, koloId, interaction.user.id, { forceNew: true });
+        return interaction.editReply({ components: [] });
+      }
+      if (action === "refresh_member") {
+        const membership = await prisma.koloMember.findUnique({
+          where: { koloId_userId: { koloId, userId: interaction.user.id } },
+        });
+        if (!membership) {
+          return interaction.editReply({ content: "❌ Nie należysz do tego koła.", components: [] });
+        }
+        await this._sendMemberPanel(interaction.client, koloId, interaction.user.id);
+        return interaction.editReply({ components: [] });
+      }
+
+      // Akcje poniżej wymagają zarządu (lider/wicelider).
+      const managed = await this._requireInvitableManager(interaction.user.id, koloId);
+      if (!managed) {
+        return interaction.followUp({ content: "❌ Musisz być liderem lub wiceliderem tego koła.", ephemeral: true });
+      }
+
+      if (action === "invite") {
+        const select = new UserSelectMenuBuilder()
+          .setCustomId(`kolo_manage_target:invite:${koloId}`)
+          .setPlaceholder("Wybierz osobę do zaproszenia")
+          .setMinValues(1)
+          .setMaxValues(1);
+        return interaction.followUp({ content: "Wybierz osobę:", components: [new ActionRowBuilder().addComponents(select)], ephemeral: true });
+      }
+
+      if (action === "revoke") {
+        const pending = await prisma.koloInvite.findMany({
+          where: { koloId, status: "PENDING", expiresAt: { gt: new Date() } },
+          orderBy: { createdAt: "desc" },
+        });
+        if (pending.length === 0) return interaction.followUp({ content: "❌ Brak oczekujących zaproszeń.", ephemeral: true });
+        const select = new StringSelectMenuBuilder()
+          .setCustomId(`kolo_invite_revoke:${koloId}`)
+          .setPlaceholder("Które zaproszenie cofnąć?")
+          .addOptions(
+            pending.slice(0, 25).map((i) => ({
+              label: `Cofnij zaproszenie (pozostało ${this._inviteTimeLeft(i.expiresAt)})`.slice(0, 100),
+              description: `Zaproszony: ${i.userId}`.slice(0, 100),
+              value: i.id,
+            }))
+          );
+        return interaction.followUp({ components: [new ActionRowBuilder().addComponents(select)], ephemeral: true });
+      }
+
+      if (action === "manage") {
+        if (kolo.status !== "ACTIVE") {
+          return interaction.followUp({ content: "❌ Pełne zarządzanie jest dostępne dopiero po zatwierdzeniu koła.", ephemeral: true });
+        }
+        return interaction.followUp({
+          content: "Wybierz akcję (to samo menu co w kanale ⚒️zarządzaj-kołem):",
+          components: [this.buildManageSelectRow()],
+          ephemeral: true,
+        });
+      }
+
+      if (action === "research") {
+        if (kolo.status !== "ACTIVE") {
+          return interaction.followUp({ content: "❌ Badania można prowadzić dopiero w aktywnym kole.", ephemeral: true });
+        }
+        const researches = await prisma.research.findMany({ where: { koloId, status: { in: ["ACTIVE", "PAUSED"] } } });
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`kolo_panel_startresearch:${koloId}`)
+            .setLabel("Rozpocznij badanie")
+            .setEmoji("🔬")
+            .setStyle(ButtonStyle.Primary)
+        );
+        if (researches.length > 0) {
+          const select = new StringSelectMenuBuilder()
+            .setCustomId(`kolo_research_pick:dm_pick:${koloId}`)
+            .setPlaceholder("Wybierz badanie (zatrzymaj / wznow / zakończ / przydziel)")
+            .addOptions(researches.slice(0, 25).map((r) => ({ label: r.topic.slice(0, 100), value: r.id })));
+          return interaction.followUp({
+            content: "Badania koła:",
+            components: [row, new ActionRowBuilder().addComponents(select)],
+            ephemeral: true,
+          });
+        }
+        return interaction.followUp({ content: "Koło nie prowadzi teraz badań.", components: [row], ephemeral: true });
+      }
+
+      return interaction.followUp({ content: "❌ Nieznana akcja panelu.", ephemeral: true });
+    } catch (err) {
+      await logError("koloService", "PANEL_BUTTON_ERROR", err.message, { action, koloId, userId: interaction.user.id, stack: err.stack });
+      return interaction.followUp({ content: "❌ Błąd serwera. Spróbuj ponownie.", ephemeral: true }).catch(() => null);
+    }
+  }
+
+  /** Drugi krok akcji niszczących z panelu DM (potwierdzenie). */
+  async handlePanelConfirm(interaction, action, koloId) {
+    await interaction.deferUpdate();
+    try {
+      const kolo = await prisma.kolo.findUnique({ where: { id: koloId } });
+      if (!kolo || DEAD_KOLO_STATUSES.includes(kolo.status)) {
+        return interaction.editReply({ content: "❌ To koło już nie istnieje.", embeds: [], components: [] });
+      }
+
+      // Wyjście z koła - akcja ZWYKŁEGO członka (przycisk na jego panelu),
+      // więc MUSI być przed sprawdzeniem zarządu. Lidera aktywnego koła i tak
+      // blokuje _leaveCore ("przekaż koło albo rozwiąż").
+      if (action === "leave") {
+        const membership = await prisma.koloMember.findUnique({ where: { koloId_userId: { koloId, userId: interaction.user.id } } });
+        if (!membership) return interaction.editReply({ content: "❌ Nie należysz do tego koła.", embeds: [], components: [] });
+        const result = await this._leaveCore(interaction.client, kolo, membership, interaction.user.id);
+        await this.refreshPanels(interaction.client, koloId);
+        return interaction.editReply({ content: result.message, embeds: [], components: [] });
+      }
+
+      // Wycofanie się członka ze zgłoszenia - nie wymaga zarządu.
+      if (action === "withdraw_member") {
+        const membership = await prisma.koloMember.findUnique({ where: { koloId_userId: { koloId, userId: interaction.user.id } } });
+        if (!membership) return interaction.editReply({ content: "❌ Nie należysz do tego koła.", embeds: [], components: [] });
+        if (["LEADER", "VICE_LEADER"].includes(membership.role)) {
+          return interaction.editReply({ content: "❌ Zarząd wycofuje zgłoszenie przyciskiem „Wycofaj zgłoszenie”.", components: [] });
+        }
+        if (kolo.status !== "PENDING_MEMBERS") {
+          return interaction.editReply({ content: "❌ Zgłoszenie nie zbiera już członków.", components: [] });
+        }
+        const result = await this._leaveCore(interaction.client, kolo, membership, interaction.user.id);
+        await this.refreshPanels(interaction.client, koloId);
+        return interaction.editReply({ content: result.message, embeds: [], components: [] });
+      }
+
+      const managed = await this._requireInvitableManager(interaction.user.id, koloId);
+      if (!managed) return interaction.editReply({ content: "❌ Musisz być liderem lub wiceliderem tego koła.", components: [] });
+
+      if (action === "withdraw") {
+        if (kolo.status !== "PENDING_MEMBERS") {
+          return interaction.editReply({ content: "❌ To zgłoszenie nie czeka już na członków.", components: [] });
+        }
+        if (kolo.leaderId !== interaction.user.id) {
+          return interaction.editReply({ content: "❌ Tylko lider może wycofać zgłoszenie.", components: [] });
+        }
+        await this._dissolveKolo(interaction.client, kolo, {
+          finalStatus: "REJECTED",
+          nameSuffix: "wycofane",
+          dmText: `🚫 Lider wycofał(a) zgłoszenie koła **${kolo.name}** - koło nie powstanie. Nie należysz już do żadnego koła.`,
+          actorId: interaction.user.id,
+          action: "kolo_application_withdrawn",
+        });
+        return interaction.editReply({
+          content: `✅ Zgłoszenie koła **${kolo.name}** wycofane. Nazwa jest znów wolna.`,
+          embeds: [],
+          components: [],
+        });
+      }
+
+      if (action === "dissolve") {
+        if (kolo.status !== "ACTIVE") {
+          return interaction.editReply({ content: "❌ Rozwiązać można tylko aktywne koło.", components: [] });
+        }
+        const message = await this._dissolveRequestCore(interaction.client, kolo, interaction.user.id);
+        return interaction.editReply({ content: message, components: [] });
+      }
+
+
+      return interaction.editReply({ content: "❌ Nieznana akcja.", components: [] });
+    } catch (err) {
+      await logError("koloService", "PANEL_CONFIRM_ERROR", err.message, { action, koloId, userId: interaction.user.id, stack: err.stack });
+      return interaction.editReply({ content: "❌ Błąd serwera.", components: [] }).catch(() => null);
+    }
+  }
+
+  /** Cofnięcie zaproszenia z panelu DM (zaproszony dostaje info, że nieaktualne). */
+  async handleInviteRevokeSelect(interaction, koloId) {
+    await interaction.deferUpdate();
+    try {
+      const managed = await this._requireInvitableManager(interaction.user.id, koloId);
+      if (!managed) return interaction.editReply({ content: "❌ Musisz być liderem lub wiceliderem tego koła.", components: [] });
+
+      const inviteId = interaction.values[0];
+      const invite = await prisma.koloInvite.findUnique({ where: { id: inviteId }, include: { kolo: true } });
+      if (!invite || invite.koloId !== koloId || invite.status !== "PENDING") {
+        return interaction.editReply({ content: "❌ To zaproszenie zostało już rozpatrzone lub wygasło.", components: [] });
+      }
+
+      await prisma.koloInvite.update({ where: { id: inviteId }, data: { status: "EXPIRED" } });
+      const invited = await interaction.client.users.fetch(invite.userId).catch(() => null);
+      await invited
+        ?.send(`↩️ Zaproszenie do koła **${invite.kolo.name}** zostało cofnięte przez zarząd.`)
+        .catch(() => null);
+
+      await logAction("kolo_invite_revoked", interaction.user.id, koloId, { targetId: invite.userId });
+      // Cofnięte zaproszenie to mniejsza szansa na komplet - przelicz licznik.
+      await this._checkMinimumMembers(interaction.client, koloId);
+      await this.refreshPanels(interaction.client, koloId);
+      return interaction.editReply({ content: `✅ Cofnięto zaproszenie dla <@${invite.userId}>.`, components: [] });
+    } catch (err) {
+      await logError("koloService", "INVITE_REVOKE_ERROR", err.message, { koloId, stack: err.stack });
+      return interaction.editReply({ content: "❌ Błąd serwera.", components: [] }).catch(() => null);
+    }
+  }
+
+  // ==================== WYJŚCIE Z KOŁA (wspólny rdzeń) ====================
+
+  /**
+   * Dobrowolne odejście z koła - wołane z panelu DM (przycisk „Opuść koło” /
+   * „Wycofaj się ze zgłoszenia”). Zwraca { ok, message } zamiast odpowiadać
+   * na interakcję, bo wywołujący odpowiada różnie (editReply/followUp).
+   *
    *  - członek/wicelider: wychodzi z koła ACTIVE albo ze zgłoszenia w
    *    PENDING_MEMBERS (przyjął zaproszenie, ale się rozmyślił) - bez tego
    *    tkwiłby w cudzym zgłoszeniu i nie mógł dołączyć nigdzie indziej,
    *  - lider AKTYWNEGO koła: nie może (musi przekazać koło albo rozwiązać),
-   *  - lider zgłoszenia w PENDING_MEMBERS: wycofuje CAŁE zgłoszenie (koło
-   *    dostaje REJECTED, członkostwa i zaproszenia są czyszczone, a
-   *    zaproszeni dostają DM) - inaczej byłby zablokowany aż do
-   *    auto-odrzucenia zgłoszenia.
+   *  - lider zgłoszenia w PENDING_MEMBERS: wycofuje CAŁE zgłoszenie - patrz
+   *    handlePanelConfirm("withdraw").
    */
-  async cmdLeave(interaction) {
-    await interaction.deferReply({ ephemeral: true });
-    const membership = await this._findLiveMembership(interaction.user.id);
-    if (!membership) {
-      return interaction.editReply({ content: "❌ Nie należysz do żadnego koła naukowego." });
-    }
-    const kolo = membership.kolo;
-
+  async _leaveCore(client, kolo, membership, userId) {
     if (membership.role === "LEADER" && kolo.status === "ACTIVE") {
-      return interaction.editReply({ content: "❌ Lider nie może opuścić koła. Przekaż najpierw rolę lidera (`/kolo prosba` → Lider) albo rozwiąż koło z kanału ⚒️zarządzaj-kołem." });
+      return {
+        ok: false,
+        message:
+          "❌ Lider nie może opuścić aktywnego koła. Przekaż najpierw rolę lidera (⚒️ Zarządzaj kołem → Zmień lidera) albo rozwiąż koło.",
+      };
     }
-
-    if (membership.role === "LEADER" && kolo.status === "PENDING_MEMBERS") {
-      await this._dissolveKolo(interaction.client, kolo, {
-        finalStatus: "REJECTED",
-        nameSuffix: "wycofane",
-        dmText: `🚫 Lider wycofał(a) zgłoszenie koła **${kolo.name}** - koło nie powstanie. Nie należysz już do żadnego koła.`,
-        actorId: interaction.user.id,
-        action: "kolo_application_withdrawn",
-      });
-      return interaction.editReply({
-        content: `✅ Zgłoszenie koła **${kolo.name}** zostało wycofane. Nazwa jest znów wolna, a Ty (i zaproszone osoby) nie należycie już do żadnego koła.`,
-      });
-    }
-
     if (kolo.status === "PENDING_REVIEW") {
-      return interaction.editReply({
-        content: "❌ Zgłoszenie koła czeka już na decyzję administracji - nie można z niego teraz wyjść. Poproś lidera o wycofanie zgłoszenia (`/kolo opusc` u lidera).",
-      });
+      return {
+        ok: false,
+        message: "❌ Zgłoszenie koła czeka już na decyzję administracji - nie można z niego teraz wyjść.",
+      };
     }
 
     const isApplication = kolo.status === "PENDING_MEMBERS";
     await prisma.koloMember.delete({ where: { id: membership.id } });
     const researchIds = (await prisma.research.findMany({ where: { koloId: kolo.id }, select: { id: true } })).map((r) => r.id);
     if (researchIds.length > 0) {
-      await prisma.researchMember.deleteMany({ where: { researchId: { in: researchIds }, userId: interaction.user.id } });
+      await prisma.researchMember.deleteMany({ where: { researchId: { in: researchIds }, userId } });
     }
     // Role istnieją dopiero od momentu aktywacji koła - przy zgłoszeniu w
     // PENDING_MEMBERS nie ma czego zdejmować (i nie niepokojmy serwera Kół).
     if (!isApplication) {
-      const guild = getKolaGuild(interaction.client);
+      const guild = getKolaGuild(client);
       if (guild) {
-        const member = await guild.members.fetch(interaction.user.id).catch(() => null);
+        const member = await guild.members.fetch(userId).catch(() => null);
         for (const roleId of [kolo.roleIdDivider, kolo.roleIdLeader, kolo.roleIdVice, kolo.roleIdMember]) {
           if (roleId) await member?.roles.remove(roleId).catch(() => null);
         }
@@ -1832,13 +2551,14 @@ class KoloService {
         for (const cr of customRoles) await member?.roles.remove(cr.roleId).catch(() => null);
       }
     }
-    await this._checkMinimumMembers(interaction.client, kolo.id);
-    await logAction("kolo_member_left", interaction.user.id, kolo.id, { koloStatus: kolo.status });
-    return interaction.editReply({
-      content: isApplication
+    await this._checkMinimumMembers(client, kolo.id);
+    await logAction("kolo_member_left", userId, kolo.id, { koloStatus: kolo.status });
+    return {
+      ok: true,
+      message: isApplication
         ? `✅ Wypisałeś(aś) się ze zgłoszenia koła **${kolo.name}**. Nie należysz już do żadnego koła.`
         : `✅ Opuściłeś koło **${kolo.name}**.`,
-    });
+    };
   }
 
   // ==================== POMOCNICZE ====================
@@ -1887,13 +2607,149 @@ class KoloService {
         ?.send(
           kolo.status === "PENDING_MEMBERS"
             ? `⚠️ Zgłoszenie koła **${kolo.name}** nie zebrało wymaganej liczby członków (${kolo.members.length}/${minRequired}). ` +
-              "Masz 72h, żeby doprosić brakujące osoby (`/kolo zaprosz`) - inaczej zgłoszenie zostanie automatycznie odrzucone, " +
-              "a wszyscy (łącznie z Tobą) zostaną z niego zwolnieni."
+              "Masz 72h, żeby doprosić brakujące osoby (przycisk 📨 Zaproś osobę na Twoim panelu koła na DM) - " +
+              "inaczej zgłoszenie zostanie automatycznie odrzucone, a wszyscy (łącznie z Tobą) zostaną z niego zwolnieni."
             : `⚠️ Koło **${kolo.name}** spadło poniżej wymaganego minimum (${minRequired} osób). ` +
-              "Masz 72h, aby uzupełnić braki (zaproś kogoś przez kanał ⚒️zarządzaj-kołem), inaczej koło zostanie automatycznie rozwiązane."
+              "Masz 72h, aby uzupełnić braki (📨 Zaproś osobę na panelu koła na DM albo w kanale ⚒️zarządzaj-kołem), " +
+              "inaczej koło zostanie automatycznie rozwiązane."
         )
         .catch(() => null);
+      // Panel lidera ma pokazać, że licznik 72h już tyka.
+      await this._sendLeaderPanel(client, koloId, kolo.leaderId).catch(() => null);
     }
+  }
+
+  // ==================== WYMÓG AKTYWNOŚCI ====================
+
+  /**
+   * Zaznacza, że w kole "coś się wydarzyło" - kasuje licznik bezczynności
+   * i ewentualne ostrzeżenie. Wołane przy: starcie badania, akceptacji
+   * własnego tematu, zakończeniu badania i dołączeniu nowego członka
+   * (patrz _checkActivityRequirement).
+   */
+  async _noteActivity(koloId) {
+    await prisma.kolo
+      .update({ where: { id: koloId }, data: { lastActivityAt: new Date(), inactivityWarnedAt: null } })
+      .catch(() => null);
+  }
+
+  /**
+   * Cel utrzymania koła: aktywne koło musi co GeneralConfig.koloInactivityDays
+   * dni wykazać jakąś aktywność (nowe/ukończone badanie albo nowy członek).
+   *  - brak aktywności ponad limit -> ostrzeżenie DM do zarządu i członków
+   *    (Kolo.inactivityWarnedAt),
+   *  - kolejne 72h bez reakcji -> auto-rozwiązanie (DISSOLVED).
+   * Limit 0 (albo brak pola w bazie sprzed migracji) wyłącza wymóg.
+   *
+   * @returns {Promise<"ok"|"warned"|"dissolved">}
+   */
+  async _checkActivityRequirement(client, kolo) {
+    if (kolo.status !== "ACTIVE") return "ok";
+
+    const cfg = await prisma.generalConfig.findUnique({ where: { id: "singleton" } });
+    const days = cfg?.koloInactivityDays ?? DEFAULT_INACTIVITY_DAYS;
+    if (!days || days <= 0) return "ok"; // wymóg wyłączony
+
+    const since = kolo.lastActivityAt || kolo.createdAt;
+    const idleMs = Date.now() - new Date(since).getTime();
+    if (idleMs < days * 24 * 60 * 60 * 1000) {
+      // Koło wróciło do życia - skasuj ewentualne ostrzeżenie.
+      if (kolo.inactivityWarnedAt) {
+        await prisma.kolo.update({ where: { id: kolo.id }, data: { inactivityWarnedAt: null } }).catch(() => null);
+      }
+      return "ok";
+    }
+
+    if (!kolo.inactivityWarnedAt) {
+      await prisma.kolo.update({ where: { id: kolo.id }, data: { inactivityWarnedAt: new Date() } });
+      const members = await prisma.koloMember.findMany({ where: { koloId: kolo.id }, select: { userId: true } });
+      const idleDays = Math.floor(idleMs / (24 * 60 * 60 * 1000));
+      const text =
+        `⚠️ Koło **${kolo.name}** nie wykazało żadnej aktywności od ${idleDays} dni (limit: ${days}). ` +
+        "Masz 72h, żeby rozpocząć lub zakończyć badanie albo przyjąć nowego członka " +
+        "(panel koła na DM → 🔬 Badania / 📨 Zaproś osobę) - inaczej koło zostanie automatycznie rozwiązane.";
+      for (const m of members) {
+        const user = await client.users.fetch(m.userId).catch(() => null);
+        await user?.send(text).catch(() => null);
+      }
+      await logAction("kolo_inactivity_warning", "system", kolo.id, { idleDays, limitDays: days });
+      return "warned";
+    }
+
+    const warnedMs = Date.now() - new Date(kolo.inactivityWarnedAt).getTime();
+    if (warnedMs < INACTIVITY_WARNING_GRACE_MS) return "warned";
+
+    await this._dissolveKolo(client, kolo, {
+      finalStatus: "DISSOLVED",
+      nameSuffix: "nieaktywne",
+      dmText:
+        `💥 Koło **${kolo.name}** zostało rozwiązane z powodu braku aktywności ` +
+        `(72h po ostrzeżeniu nic się w nim nie wydarzyło). Nie należysz już do żadnego koła: ` +
+        "możesz założyć nowe albo przyjąć zaproszenie do istniejącego.",
+      action: "kolo_auto_dissolved_inactivity",
+    });
+    return "dissolved";
+  }
+
+  // ==================== UPRAWNIENIA NA SERWERZE KÓŁ ====================
+
+  /**
+   * Nadaje zarządowi koła realne uprawnienia na serwerze Kół: lider jest
+   * administratorem WŁASNEJ kategorii (kanały, role, wiadomości), wicelider
+   * moderatorem. Dzięki temu koło samo ogarnia swoją przestrzeń bez
+   * czekania na administrację serwera.
+   *
+   * Nadpisywania ustawiamy PER ROLA (channel.permissionOverwrites.edit),
+   * a nie całym obiektem - `channels.edit({ permissionOverwrites })`
+   * zastąpiłoby całą listę i skasowało m.in. `everyone: DENY ViewChannel`,
+   * czyli otworzyłoby prywatne kanały koła dla całego serwera.
+   *
+   * Idempotentne: wołane przy aktywacji koła i raz na proces dla kół
+   * założonych wcześniej (patrz permsAppliedKola + koloScheduler).
+   */
+  async _applyKoloPermissions(guild, kolo) {
+    if (!guild || !kolo.categoryId || !kolo.roleIdLeader) return false;
+
+    const applyTo = async (channel) => {
+      if (!channel) return;
+      if (kolo.roleIdLeader) {
+        await channel.permissionOverwrites.edit(kolo.roleIdLeader, { allow: LEADER_ALLOW, deny: [] }).catch(() => null);
+      }
+      if (kolo.roleIdVice) {
+        await channel.permissionOverwrites.edit(kolo.roleIdVice, { allow: VICE_ALLOW, deny: [] }).catch(() => null);
+      }
+    };
+
+    const category = await guild.channels.fetch(kolo.categoryId).catch(() => null);
+    if (!category) return false;
+    await applyTo(category);
+
+    const children = category.children?.cache;
+    if (children?.size) {
+      for (const child of children.values()) await applyTo(child);
+    } else {
+      // Kategorie tworzone przez bota mają dzieci w cache, ale na wszelki
+      // wypadek (partial cache) przechodzimy po znanych ID kanałów.
+      for (const channelId of [
+        kolo.channelAnnouncements,
+        kolo.channelChat,
+        kolo.channelResearch,
+        kolo.channelManage,
+        kolo.channelDocuments,
+        kolo.channelVoice,
+      ]) {
+        if (!channelId) continue;
+        await applyTo(await guild.channels.fetch(channelId).catch(() => null));
+      }
+    }
+
+    permsAppliedKola.add(kolo.id);
+    return true;
+  }
+
+  /** Koła, którym w tym procesie nadano już uprawnienia (patrz wyżej). */
+  _isPermsApplied(koloId) {
+    return permsAppliedKola.has(koloId);
   }
 
 }

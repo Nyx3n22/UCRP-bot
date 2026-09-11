@@ -120,7 +120,7 @@ Wszystkie systemy z sekcji 6 specyfikacji poza Akademikami (usuniętymi na życz
 | 8 | System stypendialny | `scholarshipService.js` | `/stypendium wyplac`, `/stypendium historia` |
 | 9 | Biblioteka akademicka | `libraryService.js` | `/biblioteka wypozycz\|oddaj\|moje` |
 | 10 | Zaliczenia warunkowe | `retakeService.js` | `/warunek zglos` |
-| 11 | Koła naukowe | `koloService.js` (+ `koloScheduler.js`) | założenie: przycisk na kanale `KOLA_NAUKOWE`; `/kolo zaprosz\|wyrzuc\|prosba\|opusc\|badanie-rozpocznij\|badania lista\|zatrzymaj\|wznow\|przydziel` |
+| 11 | Koła naukowe | `koloService.js` (+ `koloScheduler.js`) | założenie: przycisk na kanale `KOLA_NAUKOWE`; zarządzanie: **panel na DM** (przyciski) i menu w kanale `⚒️zarządzaj-kołem` — bez komend slash |
 | 12 | Prace dyplomowe | `thesisService.js` | `/praca zarejestruj\|status\|moja` |
 | 13 | ~~Akademiki~~ | usunięte | — |
 | 14 | Generator Dziekanatu | modal w `commands/admin/dziekanat.js`, obsługa w `interactionCreate.js` | `/dziekanat ogloszenie` |
@@ -136,14 +136,42 @@ Zamknięcie koła zawsze przechodzi przez `_teardownKolo()` / `_dissolveKolo()`,
 
 | Sytuacja | Efekt |
 |---|---|
-| Zaproszeni odrzucą / zignorują zaproszenia (zgłoszenie bez kompletu) | start licznika `belowMinSince`; 72h na doproszenie kogoś (`/kolo zaprosz`), potem **auto-odrzucenie** zgłoszenia (`REJECTED`) i zwolnienie lidera oraz osób, które zaakceptowały |
+| Zaproszeni odrzucą / zignorują zaproszenia (zgłoszenie bez kompletu) | start licznika `belowMinSince`; 72h na doproszenie kogoś (📨 Zaproś osobę na panelu DM), potem **auto-odrzucenie** zgłoszenia (`REJECTED`) i zwolnienie lidera oraz osób, które zaakceptowały |
 | Admin odrzuca zgłoszenie | `REJECTED`, nazwa zwolniona, członkowie usunięci, DM do każdego z nich |
 | Admin zatwierdza rozwiązanie koła / koło 72h poniżej minimum | `DISSOLVED`, infrastruktura usunięta, członkostwa i przydziały do badań wyczyszczone, DM do każdego |
-| Lider zgłoszenia robi `/kolo opusc` | wycofanie całego zgłoszenia (`REJECTED`), zaproszeni dostają DM |
-| Członek zgłoszenia robi `/kolo opusc` | wypisuje się ze zgłoszenia w `PENDING_MEMBERS` (wcześniej był w nim zablokowany) |
+| Lider zgłoszenia klika „Wycofaj zgłoszenie” na panelu DM | wycofanie całego zgłoszenia (`REJECTED`), zaproszeni dostają DM |
+| Członek zgłoszenia klika „Wycofaj się ze zgłoszenia” | wypisuje się ze zgłoszenia w `PENDING_MEMBERS` (wcześniej był w nim zablokowany) |
+| Koło bez aktywności dłużej niż `GeneralConfig.koloInactivityDays` | ostrzeżenie DM do zarządu i członków, a 72h później **auto-rozwiązanie** (`DISSOLVED`) |
 | Klik w stary DM „Akceptuj” po śmierci koła | zaproszenie wygasa, nikt nie zostaje dopisany |
 
 Limit „jedno koło na osobę” jest egzekwowany na żywych kołach przy zakładaniu, wyborze zapraszanych, wysyłce zaproszenia i akceptacji zaproszenia.
+
+### Panel na DM (zamiast komend `/kolo`)
+
+Komenda `/kolo` została usunięta — całe zarządzanie dzieje się przez przyciski na DM albo przez menu w kanale `⚒️zarządzaj-kołem`. Obie drogi wołają te same rdzenie (`_inviteCore`, `_kickCore`, `_leaveCore`, `_dissolveRequestCore`, `_createChangeRequest`, `_startResearchCore`), więc reguły są identyczne niezależnie od tego, którędy kliknięto.
+
+Panel to **jedna wiadomość na osobę, edytowana w miejscu** (`refreshPanels`). Panel lidera ma trwałe ID w `Kolo.panelMessageId`, więc przeżywa restart bota, a scheduler dosyła go, jeśli użytkownik go usunie.
+
+| Kto | Przyciski |
+|---|---|
+| Zarząd, zgłoszenie `PENDING_MEMBERS` | 📨 Zaproś osobę • ↩️ Cofnij zaproszenie • 🔄 Odśwież • 🚫 Wycofaj zgłoszenie |
+| Zarząd, zgłoszenie `PENDING_REVIEW` | 🔄 Odśwież (decyduje administracja — przyciski akcji znikają, żeby nie było martwych klików) |
+| Zarząd, koło `ACTIVE` | 📨 Zaproś • ↩️ Cofnij • 🔄 Odśwież • ⚒️ Zarządzaj kołem • 🔬 Badania • 💥 Rozwiąż koło |
+| Zwykły członek | 🔄 Odśwież • 🚪 Opuść koło / Wycofaj się ze zgłoszenia |
+
+Panel odświeża się po każdej zmianie stanu koła: przyjęciu/odrzuceniu/cofnięciu zaproszenia, przejściu zgłoszenia do administracji, zatwierdzeniu koła, potwierdzeniu dostępu, wyrzuceniu, wyjściu, zmianie wicelidera, zatwierdzeniu zmiany nazwy/logo/lidera/roli oraz przy starcie i zakończeniu badania.
+
+Embed panelu pokazuje status koła, liczbę członków, listę oczekujących zaproszeń z czasem do wygaśnięcia, podsumowanie ✅/❌/⌛ oraz prowadzone badania. Akcje niszczące mają drugi krok potwierdzenia (`kolo_panel_confirm:*`).
+
+### Uprawnienia zarządu na serwerze Kół
+
+Lider jest administratorem **własnej kategorii** (`LEADER_ALLOW`: kanały, role, wiadomości, wątki, webhooki, moderacja, VC), wicelider moderatorem (`VICE_ALLOW`). Nadaje je `_applyKoloPermissions` — przy aktywacji koła i raz na proces dla kół starszych (`koloScheduler.maintainActiveKola`).
+
+Nadpisywania ustawiane są **per rola** (`channel.permissionOverwrites.edit`), nie całym obiektem: `channels.edit({ permissionOverwrites })` zastąpiłoby całą listę i skasowało `everyone: DENY ViewChannel`, otwierając prywatne kanały koła całemu serwerowi.
+
+### Cel utrzymania koła (wymóg aktywności)
+
+Aktywne koło musi co `GeneralConfig.koloInactivityDays` dni (domyślnie 30, konfigurowane w Dashboardzie → *Tematy badań*, `0` wyłącza) wykazać aktywność: nowe badanie, ukończone badanie albo nowy członek — każde z nich woła `_noteActivity`. Po przekroczeniu limitu zarząd i członkowie dostają ostrzeżenie DM, a 72h później koło jest rozwiązywane (`_checkActivityRequirement`).
 
 ## Panel `/usos` — architektura
 
