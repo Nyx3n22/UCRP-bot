@@ -496,6 +496,11 @@ class KoloService {
         // (brak wiszących zaproszeń), startuje 72h licznik, po którym
         // zgłoszenie zostanie odrzucone, a członkostwa wyczyszczone.
         await this._checkMinimumMembers(interaction.client, invite.koloId);
+        // Panel zarządu musi przestać pokazywać tę osobę jako "oczekującą" -
+        // bez tego lider widziałby ⏳ przy kimś, kto już odmówił (licznik
+        // belowMinSince nie rusza, dopóki wiszą inne zaproszenia, więc samo
+        // _checkMinimumMembers panelu by nie odświeżyło).
+        await this.refreshPanels(interaction.client, invite.koloId);
         return interaction.editReply({ content: "Odrzucono zaproszenie.", embeds: [], components: [] });
       }
 
@@ -1556,6 +1561,15 @@ class KoloService {
       prisma.koloInvite.updateMany({ where: { koloId: kolo.id, status: "PENDING" }, data: { status: "EXPIRED" } }),
       prisma.koloChangeRequest.updateMany({ where: { koloId: kolo.id, status: "PENDING_REVIEW" }, data: { status: "REJECTED" } }),
     ]);
+
+    // 1b) PANELE DM - koła już nie ma, więc jego panele nie będą nigdy
+    //     odświeżane (refreshPanels chodzi tylko po żywych członkach).
+    //     Bez tego wpisy zostawałyby w pamięci procesu na zawsze.
+    //     Kolo.panelMessageId zostaje w bazie celowo: to historia, a martwe
+    //     koło i tak nie jest nigdzie odświeżane.
+    for (const key of [...panelMessages.keys()]) {
+      if (key.startsWith(`${kolo.id}:`)) panelMessages.delete(key);
+    }
 
     // 2) DISCORD - best-effort. Koło w PENDING_MEMBERS/REJECTED nie ma tu
     //    nic (wszystkie ID są null), więc pętle po prostu nic nie robią.

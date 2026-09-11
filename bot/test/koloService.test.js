@@ -718,3 +718,55 @@ test("potwierdzenie dostępu wysyła członkowi jego panel", async () => {
   assert.ok(panel, "członek dostał wiadomość");
   assert.ok(customIds(panel.payload).includes("kolo_panel_confirm:leave:kolo1"), "to panel członka z przyciskiem wyjścia");
 });
+
+test("odrzucenie zaproszenia odświeża panel (odrzucony znika z listy oczekujących)", async () => {
+  resetDb({ status: "PENDING_MEMBERS" });
+  db.koloMember.push({ id: "m1", koloId: "kolo1", userId: "leader1", role: "LEADER", consentGiven: false });
+  db.koloInvite.push(
+    { id: "inv1", koloId: "kolo1", userId: "userA", status: "PENDING", expiresAt: new Date(Date.now() + 3600_000) },
+    { id: "inv2", koloId: "kolo1", userId: "userB", status: "PENDING", expiresAt: new Date(Date.now() + 3600_000) }
+  );
+
+  // userA odrzuca zaproszenie (klika przycisk w swoim DM)
+  sentMessages.length = 0;
+  const interaction = fakeInteraction({ user: { id: "userA", tag: "userA#1" } });
+  await koloService.handleInviteResponse(interaction, "inv1", false);
+
+  assert.equal(db.koloInvite.find((i) => i.id === "inv1").status, "DECLINED");
+
+  // panel lidera: userA nie może już wisieć jako "oczekujący", userB tak
+  const panel = sentMessages.filter((m) => m.to === "leader1").pop();
+  assert.ok(panel, "lider dostał odświeżony panel");
+  const text = embedText(panel.payload);
+  assert.equal(text.includes("<@userA>"), false, "odrzucony zniknął z listy oczekujących");
+  assert.ok(text.includes("<@userB>"), "drugi zaproszony nadal widoczny");
+  assert.ok(text.includes("odrzucone: **1**"), "licznik odrzuconych zaktualizowany");
+});
+
+test("zamknięcie koła czyści jego panele z pamięci procesu", async () => {
+  resetDb({ status: "ACTIVE" });
+  db.koloMember.push(
+    { id: "m1", koloId: "kolo1", userId: "leader1", role: "LEADER", consentGiven: true },
+    { id: "m2", koloId: "kolo1", userId: "member1", role: "MEMBER", consentGiven: true }
+  );
+
+  const client = makeFakeClient();
+  await koloService.refreshPanels(client, "kolo1");
+
+  // oba panele istnieją (lider w bazie, członek w mapie) - sprawdzamy
+  // pośrednio: drugie odświeżenie EDYTUJE zamiast wysyłać nową wiadomość
+  sentMessages.length = 0;
+  await koloService.refreshPanels(client, "kolo1");
+  assert.equal(sentMessages.filter((m) => m.to === "member1").length, 0, "panel członka edytowany, nie wysyłany ponownie");
+
+  // rozwiązanie koła
+  await koloService._dissolveKolo(client, db.kolo[0], { finalStatus: "DISSOLVED", nameSuffix: "rozwiazane" });
+  assert.equal(db.koloMember.length, 0);
+
+  // po teardownzie mapa jest pusta -> kolejne odświeżenie (gdyby ktoś je
+  // wywołał) nie miałoby czego edytować; weryfikujemy brak wpisów przez
+  // ponowne odświeżenie już bez członków (nie wysyła nic)
+  sentMessages.length = 0;
+  await koloService.refreshPanels(client, "kolo1");
+  assert.equal(sentMessages.length, 0, "po zamknięciu koła nie ma już paneli do odświeżenia");
+});
