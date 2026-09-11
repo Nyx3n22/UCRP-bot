@@ -15,8 +15,8 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName("ticket")
     .setDescription("🎫 | Zarządzanie ticketami")
-    .addSubcommand((s) => s.setName("przypisz").setDescription("Przypisuje Cię do bieżącego ticketu"))
-    .addSubcommand((s) => s.setName("zamknij").setDescription("Zamyka bieżący ticket i tworzy transkrypcję")),
+    .addSubcommand((s) => s.setName("przypisz").setDescription("📎 | Przypisuje Cię do bieżącego ticketu"))
+    .addSubcommand((s) => s.setName("zamknij").setDescription("🔒 | Zamyka bieżący ticket i tworzy transkrypcję")),
 
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();

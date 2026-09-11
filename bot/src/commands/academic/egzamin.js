@@ -19,7 +19,7 @@ module.exports = {
     .addSubcommand((sub) =>
       sub
         .setName("start")
-        .setDescription("Rozpoczyna egzamin DM dla studentów danego wydziału")
+        .setDescription("🚀 | Rozpoczyna egzamin DM dla studentów danego wydziału")
         .addStringOption((o) => o.setName("przedmiot").setDescription("Nazwa przedmiotu").setRequired(true))
         .addStringOption((o) => o.setName("temat").setDescription("Temat egzaminu").setRequired(true))
     ),

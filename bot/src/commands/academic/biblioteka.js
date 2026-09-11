@@ -9,16 +9,16 @@ module.exports = {
     .addSubcommand((s) =>
       s
         .setName("wypozycz")
-        .setDescription("Wypożycza zasób")
+        .setDescription("📥 | Wypożycza zasób")
         .addStringOption((o) => o.setName("tytul").setDescription("Tytuł zasobu").setRequired(true))
     )
     .addSubcommand((s) =>
       s
         .setName("oddaj")
-        .setDescription("Zwraca zasób")
+        .setDescription("📤 | Zwraca zasób")
         .addStringOption((o) => o.setName("tytul").setDescription("Tytuł zasobu").setRequired(true))
     )
-    .addSubcommand((s) => s.setName("moje").setDescription("Twoje aktywne wypożyczenia")),
+    .addSubcommand((s) => s.setName("moje").setDescription("🔖 | Twoje aktywne wypożyczenia")),
 
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();

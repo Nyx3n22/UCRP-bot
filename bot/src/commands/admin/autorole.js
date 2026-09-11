@@ -17,10 +17,10 @@ module.exports = {
     .addSubcommand((s) =>
       s
         .setName("panel")
-        .setDescription("Publikuje panel autoról na tym kanale")
+        .setDescription("🎛️ | Publikuje panel autoról na tym kanale")
         .addStringOption((o) => o.setName("grupa").setDescription("Klucz grupy skonfigurowanej w Dashboardzie").setRequired(true))
     )
-    .addSubcommand((s) => s.setName("grupy").setDescription("Lista dostępnych grup autoról")),
+    .addSubcommand((s) => s.setName("grupy").setDescription("👥 | Lista dostępnych grup autoról")),
 
   async execute(interaction) {
     if (!(await hasPermission(interaction.member, "MANAGE_REACTION_ROLES"))) {

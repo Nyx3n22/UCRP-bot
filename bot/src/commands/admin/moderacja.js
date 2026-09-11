@@ -28,21 +28,21 @@ module.exports = {
     .addSubcommand((s) =>
       s
         .setName("ban")
-        .setDescription("Banuje użytkownika")
+        .setDescription("🔨 | Banuje użytkownika")
         .addUserOption((o) => o.setName("uzytkownik").setDescription("Kogo zbanować").setRequired(true))
         .addStringOption((o) => o.setName("powod").setDescription("Powód").setRequired(true))
     )
     .addSubcommand((s) =>
       s
         .setName("kick")
-        .setDescription("Wyrzuca użytkownika")
+        .setDescription("🦶 | Wyrzuca użytkownika")
         .addUserOption((o) => o.setName("uzytkownik").setDescription("Kogo wyrzucić").setRequired(true))
         .addStringOption((o) => o.setName("powod").setDescription("Powód").setRequired(true))
     )
     .addSubcommand((s) =>
       s
         .setName("mute")
-        .setDescription("Wycisza użytkownika (timeout)")
+        .setDescription("🔇 | Wycisza użytkownika (timeout)")
         .addUserOption((o) => o.setName("uzytkownik").setDescription("Kogo wyciszyć").setRequired(true))
         .addIntegerOption((o) => o.setName("minuty").setDescription("Czas w minutach").setRequired(true))
         .addStringOption((o) => o.setName("powod").setDescription("Powód").setRequired(true))
@@ -50,13 +50,13 @@ module.exports = {
     .addSubcommand((s) =>
       s
         .setName("clear")
-        .setDescription("Usuwa wiadomości z kanału")
+        .setDescription("🧹 | Usuwa wiadomości z kanału")
         .addIntegerOption((o) => o.setName("ilosc").setDescription("1-100").setRequired(true))
     )
     .addSubcommand((s) =>
       s
         .setName("kara")
-        .setDescription("Wydaje karę dyscyplinarną IC")
+        .setDescription("⚖️ | Wydaje karę dyscyplinarną IC")
         .addUserOption((o) => o.setName("uzytkownik").setDescription("Komu wydać karę").setRequired(true))
         .addStringOption((o) =>
           o
@@ -75,7 +75,7 @@ module.exports = {
     .addSubcommand((s) =>
       s
         .setName("ogloszenie")
-        .setDescription("Wysyła oficjalne ogłoszenie na skonfigurowany kanał")
+        .setDescription("📯 | Wysyła oficjalne ogłoszenie na skonfigurowany kanał")
         .addStringOption((o) => o.setName("tresc").setDescription("Treść ogłoszenia").setRequired(true))
     ),
 

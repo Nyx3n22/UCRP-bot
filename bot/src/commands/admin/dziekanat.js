@@ -16,11 +16,11 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName("dziekanat")
     .setDescription("🏛️ | Narzędzia Dziekanatu")
-    .addSubcommand((s) => s.setName("ogloszenie").setDescription("Otwiera kreator oficjalnego ogłoszenia"))
+    .addSubcommand((s) => s.setName("ogloszenie").setDescription("📣 | Otwiera kreator oficjalnego ogłoszenia"))
     .addSubcommand((s) =>
       s
         .setName("legitymacja-przedluz")
-        .setDescription(`Przedłuża ważność legitymacji studenckiej o ${VALIDITY_DAYS} dni`)
+        .setDescription(`♻️ | Przedłuża ważność legitymacji studenckiej o ${VALIDITY_DAYS} dni`)
         .addUserOption((o) => o.setName("osoba").setDescription("Komu przedłużyć ważność").setRequired(true))
     ),
 

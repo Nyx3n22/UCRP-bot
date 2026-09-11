@@ -23,11 +23,11 @@ module.exports = {
     .addSubcommand((s) =>
       s
         .setName("rozmawiaj")
-        .setDescription("Wysyła wiadomość do NPC i publikuje jego odpowiedź")
+        .setDescription("🗣️ | Wysyła wiadomość do NPC i publikuje jego odpowiedź")
         .addStringOption((o) => o.setName("postac").setDescription("Nazwa NPC").setRequired(true))
         .addStringOption((o) => o.setName("wiadomosc").setDescription("Co mówisz do NPC").setRequired(true))
     )
-    .addSubcommand((s) => s.setName("lista").setDescription("Lista dostępnych postaci NPC")),
+    .addSubcommand((s) => s.setName("lista").setDescription("🧾 | Lista dostępnych postaci NPC")),
 
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
