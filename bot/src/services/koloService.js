@@ -35,7 +35,21 @@
  * 72h na uzupełnienie braków (inaczej auto-rozwiązanie) są pilnowane
  * przez ten sam mechanizm co wygasanie niezaakceptowanych zaproszeń
  * (patrz koloScheduler.js) - Kolo.belowMinSince to wspólny licznik dla
- * obu przypadków, dla prostoty i spójności.
+ * obu przypadków, dla prostoty i spójności. Licznik działa też dla zgłoszeń
+ * w PENDING_MEMBERS: jeśli zaproszeni odrzucą/zignorują zaproszenia, koło
+ * nie wisi wiecznie, tylko po 72h zostaje odrzucone (a członkostwa
+ * wyczyszczone).
+ *
+ * CZŁONKOSTWO - jedyne źródło prawdy to KoloMember, ale wpis liczy się
+ * TYLKO dopóki koło żyje (PENDING_MEMBERS / PENDING_REVIEW / ACTIVE).
+ * Każde odrzucenie albo rozwiązanie koła (ręcznie przez admina, auto po
+ * 72h, wycofanie zgłoszenia) MUSI usunąć członków, ich przydziały do badań
+ * i wygasić wiszące zaproszenia - patrz _teardownKolo/_dissolveKolo.
+ * Sprzątanie bazy jest zawsze pierwsze i niezależne od tego, czy serwer
+ * Kół jest osiągalny (usuniecie kanałów/ról to tylko best-effort dodatek),
+ * a KAŻDE sprawdzenie "czy ktoś jest w kole" idzie przez
+ * _findLiveMembership, które ignoruje martwe statusy i przy okazji usuwa
+ * sieroty zostawione przez wcześniejsze wersje bota.
  */
 
 const {
@@ -61,6 +75,12 @@ const { getKolaGuild } = require("../config/kolaGuild");
 
 const MIN_INVITED = 3; // + lider = min. 4 osoby
 const MAX_MEMBERS = 15;
+
+// Statusy, w których koło naprawdę istnieje - tylko wtedy członkostwo
+// (KoloMember) coś znaczy. REJECTED/DISSOLVED to trupy: wpisy członków
+// takiego koła to sieroty, które nie mogą nikogo blokować.
+const LIVE_KOLO_STATUSES = ["PENDING_MEMBERS", "PENDING_REVIEW", "ACTIVE"];
+const DEAD_KOLO_STATUSES = ["REJECTED", "DISSOLVED"];
 const GRACE_PERIOD_MS = 72 * 60 * 60 * 1000; // 72h
 const RESEARCH_CAPACITY = { 1: 3, 2: 6, 3: 10 }; // ile osób w kole potrzeba na N jednoczesnych badań
 const MAX_CONCURRENT_RESEARCH = 3;
@@ -71,6 +91,85 @@ const MAX_CONCURRENT_RESEARCH = 3;
 const pendingApplications = new Map();
 
 class KoloService {
+  // ==================== CZŁONKOSTWO (wspólne rdzenie) ====================
+
+  /**
+   * Usuwa sieroce członkostwa wskazanych użytkowników z kół MARTWYCH
+   * (REJECTED/DISSOLVED) razem z ich przydziałami do badań. Zwraca liczbę
+   * znalezionych sierot.
+   *
+   * Po co: gdy koło zostało odrzucone/rozwiązane, a wpisy KoloMember z
+   * jakiegokolwiek powodu przetrwały (starsza wersja bota, błąd w połowie
+   * teardownu, brak dostępu do serwera Kół), reguła "jedno koło" blokowała
+   * taką osobę NA ZAWSZE - nie mogła założyć nowego koła ani przyjąć
+   * zaproszenia. Teraz każde sprawdzenie członkostwa sprząta po sobie.
+   */
+  async _purgeStaleMemberships(userIds) {
+    const ids = [...new Set((Array.isArray(userIds) ? userIds : [userIds]).filter(Boolean))];
+    if (ids.length === 0) return 0;
+
+    const stale = await prisma.koloMember.findMany({
+      where: { userId: { in: ids }, kolo: { status: { in: DEAD_KOLO_STATUSES } } },
+      select: { koloId: true, userId: true },
+    });
+    if (stale.length === 0) return 0;
+
+    const koloIds = [...new Set(stale.map((m) => m.koloId))];
+    await this._clearKoloMembers(koloIds);
+    await logAction("kolo_stale_memberships_purged", ids[0], koloIds[0], {
+      koloIds,
+      affectedUsers: [...new Set(stale.map((m) => m.userId))],
+    });
+    return stale.length;
+  }
+
+  /**
+   * Usuwa "ludzi" z koła/ł kół: członkostwa + przydziały do ich badań.
+   * Samo Kolo zostaje (historia/logi), ale nikt już w nim nie figuruje.
+   */
+  async _clearKoloMembers(koloIds) {
+    const ids = [...new Set((Array.isArray(koloIds) ? koloIds : [koloIds]).filter(Boolean))];
+    if (ids.length === 0) return;
+
+    const researchIds = (
+      await prisma.research.findMany({ where: { koloId: { in: ids } }, select: { id: true } })
+    ).map((r) => r.id);
+
+    await prisma.$transaction([
+      prisma.koloMember.deleteMany({ where: { koloId: { in: ids } } }),
+      ...(researchIds.length > 0
+        ? [prisma.researchMember.deleteMany({ where: { researchId: { in: researchIds } } })]
+        : []),
+    ]);
+  }
+
+  /**
+   * JEDYNE miejsce, którym wolno sprawdzać "czy użytkownik jest w kole".
+   * Najpierw sprząta sieroty po martwych kołach, potem szuka członkostwa
+   * wyłącznie w kołach o żywym statusie.
+   *
+   * @param {string} userId
+   * @param {object} [opts]
+   * @param {string[]|null} [opts.roles]     ograniczenie do ról (LEADER/VICE_LEADER)
+   * @param {string|null}   [opts.koloId]    ograniczenie do konkretnego koła
+   * @param {string[]}      [opts.statuses]  dopuszczalne statusy koła (domyślnie żywe)
+   * @returns {Promise<object|null>} membership z dołączonym `kolo` albo null
+   */
+  async _findLiveMembership(userId, { roles = null, koloId = null, statuses = LIVE_KOLO_STATUSES } = {}) {
+    if (!userId) return null;
+    await this._purgeStaleMemberships(userId);
+
+    return prisma.koloMember.findFirst({
+      where: {
+        userId,
+        ...(koloId ? { koloId } : {}),
+        ...(roles ? { role: { in: roles } } : {}),
+        kolo: { status: { in: statuses } },
+      },
+      include: { kolo: true },
+    });
+  }
+
   // ==================== PANEL / ZGŁOSZENIE ====================
 
   buildPanelEmbed() {
@@ -144,9 +243,15 @@ class KoloService {
 
   async handleApplyModalSubmit(interaction) {
     try {
-      const existingMembership = await prisma.koloMember.findFirst({ where: { userId: interaction.user.id } });
+      // Członkostwo liczymy tylko w ŻYWYCH kołach - po odrzuconym/
+      // rozwiązanym kole użytkownik musi móc założyć nowe (a przy okazji
+      // sprzątamy ewentualne sieroty w bazie).
+      const existingMembership = await this._findLiveMembership(interaction.user.id);
       if (existingMembership) {
-        return interaction.reply({ content: "❌ Jesteś już członkiem koła naukowego. Nie można należeć do dwóch naraz.", ephemeral: true });
+        return interaction.reply({
+          content: `❌ Jesteś już członkiem koła naukowego (**${existingMembership.kolo.name}**). Nie można należeć do dwóch naraz.`,
+          ephemeral: true,
+        });
       }
 
       const nameTaken = await prisma.kolo.findUnique({
@@ -193,7 +298,14 @@ class KoloService {
       // Osoby już w innym kole nie mogą przyjąć zaproszenia (reguła jednego
       // koła) - odfiltruj je OD RAZU, inaczej zgłoszenie utknie w
       // PENDING_MEMBERS z zaproszeniami, których nikt nie może przyjąć.
-      const busyMembers = await prisma.koloMember.findMany({ where: { userId: { in: pickedIds } }, select: { userId: true } });
+      // Liczą się tylko ŻYWE koła: ktoś, czyje koło zostało odrzucone albo
+      // rozwiązane, jest wolny i może być zaproszony (najpierw sprzątamy
+      // sieroty, żeby nie blokowały nikogo na podstawie martwych wpisów).
+      await this._purgeStaleMemberships(pickedIds);
+      const busyMembers = await prisma.koloMember.findMany({
+        where: { userId: { in: pickedIds }, kolo: { status: { in: LIVE_KOLO_STATUSES } } },
+        select: { userId: true },
+      });
       const busySet = new Set(busyMembers.map((m) => m.userId));
       const invitedIds = pickedIds.filter((id) => !busySet.has(id));
       if (invitedIds.length < MIN_INVITED) {
@@ -265,6 +377,17 @@ class KoloService {
       if (invite.status !== "PENDING") {
         return interaction.editReply({ content: "❌ To zaproszenie zostało już rozpatrzone lub wygasło.", components: [] });
       }
+      if (DEAD_KOLO_STATUSES.includes(invite.kolo?.status)) {
+        // Koło zdążyło zostać odrzucone/rozwiązane (np. auto-odrzucenie
+        // zgłoszenia, w którym nikt nie zaakceptował zaproszeń). Kliknięcie
+        // starego DM-a nie może już nikogo dopisać do martwego koła.
+        await prisma.koloInvite.update({ where: { id: inviteId }, data: { status: "EXPIRED" } }).catch(() => null);
+        return interaction.editReply({
+          content: "❌ To koło zostało odrzucone lub rozwiązane - zaproszenie jest nieaktualne.",
+          embeds: [],
+          components: [],
+        });
+      }
 
       if (!accepted) {
         await prisma.koloInvite.update({ where: { id: inviteId }, data: { status: "DECLINED" } });
@@ -275,16 +398,22 @@ class KoloService {
               `Użyj \`/kolo zaprosz\`, aby zaprosić kogoś innego.`
           )
           .catch(() => null);
+        // Od razu przelicz minimum: jeśli to była ostatnia szansa na komplet
+        // (brak wiszących zaproszeń), startuje 72h licznik, po którym
+        // zgłoszenie zostanie odrzucone, a członkostwa wyczyszczone.
+        await this._checkMinimumMembers(interaction.client, invite.koloId);
         return interaction.editReply({ content: "Odrzucono zaproszenie.", embeds: [], components: [] });
       }
 
       // Ktoś mógł dołączyć do innego koła już PO otrzymaniu tego
       // zaproszenia - członkostwo w dwóch kołach naraz jest zabronione.
-      const memberElsewhere = await prisma.koloMember.findFirst({ where: { userId: interaction.user.id } });
+      // Sprawdzamy tylko ŻYWE koła (członkostwo w odrzuconym/rozwiązanym
+      // to sierota, nie przeszkoda).
+      const memberElsewhere = await this._findLiveMembership(interaction.user.id);
       if (memberElsewhere && memberElsewhere.koloId !== invite.koloId) {
         await prisma.koloInvite.update({ where: { id: inviteId }, data: { status: "DECLINED" } });
         return interaction.editReply({
-          content: "❌ Należysz już do innego koła naukowego - nie możesz przyjąć tego zaproszenia.",
+          content: `❌ Należysz już do innego koła naukowego (**${memberElsewhere.kolo.name}**) - nie możesz przyjąć tego zaproszenia.`,
           embeds: [],
           components: [],
         });
@@ -326,9 +455,14 @@ class KoloService {
           await leader
             ?.send(
               `⚠️ W kole **${invite.kolo.name}** zaakceptowało tylko ${acceptedCount} z wymaganych min. ${MIN_INVITED} osób. ` +
-                `Zaproś brakujące osoby komendą \`/kolo zaprosz\`, żeby zgłoszenie mogło trafić do oceny.`
+                `Zaproś brakujące osoby komendą \`/kolo zaprosz\`, żeby zgłoszenie mogło trafić do oceny. ` +
+                "Masz na to 72h - potem zgłoszenie zostanie automatycznie odrzucone, a wszyscy zwolnieni z koła."
             )
             .catch(() => null);
+          // Start licznika 72h (belowMinSince) - bez tego zgłoszenie wisi
+          // w PENDING_MEMBERS wiecznie, a lider i zaakceptowani członkowie
+          // są zablokowani (nie mogą założyć/dołączyć do innego koła).
+          await this._checkMinimumMembers(interaction.client, invite.koloId);
         }
       }
 
@@ -371,7 +505,13 @@ class KoloService {
   }
 
   async _advanceToReview(client, koloId) {
-    const kolo = await prisma.kolo.update({ where: { id: koloId }, data: { status: "PENDING_REVIEW" }, include: { members: true } });
+    // belowMinSince: null - komplet zebrany, licznik "poniżej minimum"
+    // (wspólny dla ACTIVE i PENDING_MEMBERS) przestaje tykać.
+    const kolo = await prisma.kolo.update({
+      where: { id: koloId },
+      data: { status: "PENDING_REVIEW", belowMinSince: null },
+      include: { members: true },
+    });
 
     const ai = await this._aiScore(
       "rejestracja_kola",
@@ -418,21 +558,36 @@ class KoloService {
 
       if (!approve) {
         // Nazwa jest @unique - odrzucone koło musi ją zwolnić, inaczej nikt
-        // nigdy nie założy koła o tej nazwie. Członków też usuwamy, inaczej
-        // reguła "jedno koło" blokowałaby ich na zawsze (nie mogliby ani
-        // założyć nowego, ani dołączyć do innego).
-        await prisma.$transaction([
-          prisma.kolo.update({ where: { id: koloId }, data: { status: "REJECTED", name: `${kolo.name}#odrzucone-${koloId.slice(0, 6)}` } }),
-          prisma.koloMember.deleteMany({ where: { koloId } }),
-          prisma.koloInvite.updateMany({ where: { koloId, status: "PENDING" }, data: { status: "EXPIRED" } }),
-        ]);
-        const leader = await interaction.client.users.fetch(kolo.leaderId).catch(() => null);
-        await leader?.send(`❌ Zgłoszenie koła **${kolo.name}** zostało odrzucone przez administrację.`).catch(() => null);
-        await logAction("kolo_rejected", interaction.user.id, koloId, {});
+        // nigdy nie założy koła o tej nazwie. Członków (i ich przydziały do
+        // badań oraz wiszące zaproszenia) czyści _teardownKolo - inaczej
+        // reguła "jedno koło" blokowałaby ich na zawsze: nie mogliby ani
+        // założyć nowego, ani dołączyć do innego.
+        await this._teardownKolo(null, kolo, { finalStatus: "REJECTED", nameSuffix: "odrzucone" });
+        for (const m of kolo.members) {
+          const user = await interaction.client.users.fetch(m.userId).catch(() => null);
+          await user
+            ?.send(
+              `❌ Zgłoszenie koła **${kolo.name}** zostało odrzucone przez administrację. ` +
+                "Nie należysz już do żadnego koła - możesz założyć nowe albo przyjąć zaproszenie do istniejącego."
+            )
+            .catch(() => null);
+        }
+        await logAction("kolo_rejected", interaction.user.id, koloId, { name: kolo.name, freedMembers: kolo.members.map((m) => m.userId) });
         return interaction.editReply({ components: [] });
       }
 
-      await this._activateKolo(interaction.client, kolo);
+      const activated = await this._activateKolo(interaction.client, kolo);
+      if (!activated) {
+        // Infrastruktura nie powstała (brak serwera Kół / błąd Discorda) -
+        // NIE zdejmujemy przycisków i nie zostawiamy koła w limbo: admin
+        // dostaje komunikat i może ponowić, gdy bot znów zobaczy serwer.
+        return interaction.followUp({
+          content:
+            "❌ Nie udało się utworzyć kategorii/kanałów/ról koła (serwer Kół Naukowych jest niedostępny albo bot nie ma tam uprawnień). " +
+            "Zgłoszenie zostaje nierozpatrzone - kliknij ponownie później.",
+          ephemeral: true,
+        });
+      }
       await logAction("kolo_approved", interaction.user.id, koloId, { name: kolo.name });
       return interaction.editReply({ components: [] });
     } catch (err) {
@@ -448,14 +603,43 @@ class KoloService {
    * reszta bota. Nadaje rolę liderowi od razu (on zarejestrował koło,
    * zgoda jest dorozumiana), a pozostałym członkom wysyła DM z prośbą
    * o zgodę i linkiem do DRUGIEGO serwera - ich role zostaną nadane
-   * dopiero po kliknięciu (i dołączeniu tam, jeśli jeszcze ich nie ma). */
+   * dopiero po kliknięciu (i dołączeniu tam, jeśli jeszcze ich nie ma).
+   *
+   * Zwraca true/false - przy false koło NIE zostało aktywowane (zostało w
+   * PENDING_REVIEW z przyciskami do ponowienia), a częściowo utworzone
+   * kanały/role są posprzątane. */
   async _activateKolo(client, kolo) {
     const guild = getKolaGuild(client);
     if (!guild) {
       await logError("koloService", "NO_KOLA_GUILD", "KOLA_GUILD_ID nieustawione lub bot nie jest na tym serwerze - nie można aktywować koła.", { koloId: kolo.id });
-      return;
+      return false;
     }
 
+    const created = []; // role/kanały utworzone w tej próbie - materiał do rollbacku
+    try {
+      await this._activateKoloInner(client, guild, kolo, created);
+      return true;
+    } catch (err) {
+      await logError("koloService", "ACTIVATE_KOLO_ERROR", err.message, { koloId: kolo.id, stack: err.stack });
+
+      // Jeśli koło zdążyło zostać zapisane jako ACTIVE (błąd nastąpił już po
+      // aktualizacji bazy), infrastruktura JEST używana - kasowanie jej
+      // zostawiłoby aktywne koło bez kanałów. Wtedy uznajemy aktywację za
+      // udaną i tylko logujemy problem.
+      const current = await prisma.kolo.findUnique({ where: { id: kolo.id } }).catch(() => null);
+      if (current?.status === "ACTIVE") return true;
+
+      // Niedokończona infrastruktura to śmieci (koło nie jest ACTIVE, więc
+      // żaden teardown nigdy by jej nie znalazł) - usuwamy w odwrotnej
+      // kolejności, best-effort.
+      for (const obj of [...created].reverse()) {
+        await obj.delete?.("Błąd podczas tworzenia koła naukowego").catch(() => null);
+      }
+      return false;
+    }
+  }
+
+  async _activateKoloInner(client, guild, kolo, created) {
     const { emoji, hex } = await detectDominantColor(kolo.logoUrl);
 
     const divider = await guild.roles.create({
@@ -464,9 +648,13 @@ class KoloService {
       hoist: true,
       mentionable: false,
     });
+    created.push(divider);
     const roleLider = await guild.roles.create({ name: "• Lider Koła Naukowego •", color: hex, mentionable: true });
+    created.push(roleLider);
     const roleWicelider = await guild.roles.create({ name: "• Wicelider Koła Naukowego •", color: hex, mentionable: true });
+    created.push(roleWicelider);
     const roleCzlonek = await guild.roles.create({ name: "• Członek Koła Naukowego •", color: hex, mentionable: true });
+    created.push(roleCzlonek);
 
     const everyone = guild.roles.everyone;
     const category = await guild.channels.create({
@@ -477,6 +665,7 @@ class KoloService {
         { id: divider.id, allow: ["ViewChannel"] },
       ],
     });
+    created.push(category);
 
     const ogloszenia = await guild.channels.create({
       name: "📣│ogłoszenia-koła",
@@ -489,12 +678,14 @@ class KoloService {
         { id: roleWicelider.id, allow: ["SendMessages"] },
       ],
     });
+    created.push(ogloszenia);
 
     const czat = await guild.channels.create({
       name: "💬│czat-koła",
       type: 0,
       parent: category.id,
     });
+    created.push(czat);
 
     const badania = await guild.channels.create({
       name: "🔬│badania",
@@ -505,6 +696,7 @@ class KoloService {
         { id: divider.id, allow: ["ViewChannel"], deny: ["SendMessages"] },
       ],
     });
+    created.push(badania);
 
     const zarzadzaj = await guild.channels.create({
       name: "⚒️│zarządzaj-kołem",
@@ -517,18 +709,21 @@ class KoloService {
         { id: roleWicelider.id, allow: ["ViewChannel", "SendMessages"] },
       ],
     });
+    created.push(zarzadzaj);
 
     const dokumenty = await guild.channels.create({
       name: "📜│dokumenty-koła",
       type: 15, // GuildForum
       parent: category.id,
     });
+    created.push(dokumenty);
 
     const vc = await guild.channels.create({
       name: "🔊│vc",
       type: 2, // GuildVoice
       parent: category.id,
     });
+    created.push(vc);
 
     await prisma.kolo.update({
       where: { id: kolo.id },
@@ -567,14 +762,20 @@ class KoloService {
 
     await this.postManageEmbed(zarzadzaj, kolo.id);
 
-    const welcomeBanner = new AttachmentBuilder(generateBanner(kolo.name, hex), { name: "banner.png" });
-    const welcome = new EmbedBuilder()
-      .setTitle(`${emoji} Koło Naukowe ${kolo.name} zostało utworzone!`)
-      .setDescription(kolo.description)
-      .setImage("attachment://banner.png")
-      .setColor(hex).setFooter({ text: "Uniwersytet Centralny RP • Koła Naukowe" }).setTimestamp();
-    if (kolo.logoUrl) welcome.setThumbnail(kolo.logoUrl);
-    await ogloszenia.send({ embeds: [welcome], files: [welcomeBanner] }).catch(() => null);
+    // Baner powitalny to kosmetyka (Canvas) - jego awaria nie może wykładać
+    // całej aktywacji, bo skończyłaby się rollbackiem działającego koła.
+    try {
+      const welcomeBanner = new AttachmentBuilder(generateBanner(kolo.name, hex), { name: "banner.png" });
+      const welcome = new EmbedBuilder()
+        .setTitle(`${emoji} Koło Naukowe ${kolo.name} zostało utworzone!`)
+        .setDescription(kolo.description)
+        .setImage("attachment://banner.png")
+        .setColor(hex).setFooter({ text: "Uniwersytet Centralny RP • Koła Naukowe" }).setTimestamp();
+      if (kolo.logoUrl) welcome.setThumbnail(kolo.logoUrl);
+      await ogloszenia.send({ embeds: [welcome], files: [welcomeBanner] }).catch(() => null);
+    } catch (err) {
+      await logError("koloService", "WELCOME_BANNER_ERROR", err.message, { koloId: kolo.id, stack: err.stack });
+    }
   }
 
   async _sendConsentDm(client, koloId, userId, koloName) {
@@ -634,12 +835,9 @@ class KoloService {
   }
 
   async _getManagedKolo(userId) {
-    const membership = await prisma.koloMember.findFirst({
-      where: { userId, role: { in: ["LEADER", "VICE_LEADER"] } },
-      include: { kolo: true },
-    });
-    if (!membership || membership.kolo.status !== "ACTIVE") return null;
-    return membership;
+    // Tylko AKTYWNE koła i tylko żywe członkostwa (sieroty po odrzuconych/
+    // rozwiązanych kołach są przy okazji usuwane z bazy).
+    return this._findLiveMembership(userId, { roles: ["LEADER", "VICE_LEADER"], statuses: ["ACTIVE"] });
   }
 
   /**
@@ -649,12 +847,7 @@ class KoloService {
    * Zwraca membership albo null (i wtedy handler ma przerwać).
    */
   async _requireManager(userId, koloId) {
-    const membership = await prisma.koloMember.findFirst({
-      where: { userId, koloId, role: { in: ["LEADER", "VICE_LEADER"] } },
-      include: { kolo: true },
-    });
-    if (!membership || membership.kolo.status !== "ACTIVE") return null;
-    return membership;
+    return this._findLiveMembership(userId, { roles: ["LEADER", "VICE_LEADER"], koloId, statuses: ["ACTIVE"] });
   }
 
   // ==================== EMBED ZARZĄDZANIA (kanał ⚒️zarządzaj-kołem) ====================
@@ -790,10 +983,14 @@ class KoloService {
     const memberCount = await prisma.koloMember.count({ where: { koloId: kolo.id } });
     if (memberCount >= MAX_MEMBERS) return { ok: false, message: `❌ Koło ma już maksymalną liczbę członków (${MAX_MEMBERS}).` };
 
-    const already = await prisma.koloMember.findFirst({ where: { userId: targetId } });
-    if (already) return { ok: false, message: "❌ Ta osoba należy już do jakiegoś koła." };
+    // "Należy do jakiegoś koła" liczymy tylko dla ŻYWYCH kół - po
+    // odrzuconym/rozwiązanym kole wpis członka to sierota, przez którą
+    // nie dało się już nikogo zaprosić (ani nigdzie dołączyć).
+    const already = await this._findLiveMembership(targetId);
+    if (already && already.koloId === kolo.id) return { ok: false, message: `❌ <@${targetId}> jest już członkiem tego koła.` };
+    if (already) return { ok: false, message: `❌ Ta osoba należy już do koła **${already.kolo.name}**.` };
 
-    const pendingInvite = await prisma.koloInvite.findFirst({ where: { koloId: kolo.id, userId: targetId, status: "PENDING" } });
+    const pendingInvite = await prisma.koloInvite.findFirst({ where: { koloId: kolo.id, userId: targetId, status: "PENDING", expiresAt: { gt: new Date() } } });
     if (pendingInvite) return { ok: false, message: "❌ Ta osoba ma już wysłane zaproszenie." };
 
     // Upsert, nie create: (koloId, userId) jest @unique, a ktoś mógł już
@@ -805,6 +1002,12 @@ class KoloService {
     });
     const leaderUser = await client.users.fetch(kolo.leaderId).catch(() => null);
     await this._sendInviteDm(client, invite, kolo, leaderUser || actorUser);
+    // Nowe zaproszenie = nowa szansa na komplet. Dla zgłoszenia w
+    // PENDING_MEMBERS wiszące zaproszenie wstrzymuje licznik "poniżej
+    // minimum" (inaczej zgłoszenie zostałoby odrzucone w połowie
+    // dopraszania ludzi); dla AKTYWNEGO koła licznik biegnie dalej, bo
+    // samo wysłanie zaproszenia jeszcze braków nie uzupełniło.
+    await this._checkMinimumMembers(client, kolo.id);
     await logAction("kolo_invite_sent", actorUser.id, kolo.id, { targetId });
     return { ok: true, message: `✅ Wysłano zaproszenie do <@${targetId}>.` };
   }
@@ -1076,35 +1279,138 @@ class KoloService {
     return interaction.editReply({ content: "✅ Prośba o rozwiązanie koła wysłana do administracji." });
   }
 
-  /** Usuwa kategorię/kanały/role koła i oznacza je jako rozwiązane - używane
-   * zarówno przy ręcznym zatwierdzeniu przez admina, jak i auto-rozwiązaniu
-   * po 72h poniżej minimum (koloScheduler.js). */
-  async _teardownKolo(guild, kolo) {
-    const customRoles = await prisma.koloCustomRole.findMany({ where: { koloId: kolo.id } });
-    for (const roleId of [kolo.roleIdDivider, kolo.roleIdLeader, kolo.roleIdVice, kolo.roleIdMember, ...customRoles.map((r) => r.roleId)]) {
-      if (!roleId) continue;
-      const role = await guild.roles.fetch(roleId).catch(() => null);
-      await role?.delete("Koło Naukowe rozwiązane").catch(() => null);
-    }
+  /**
+   * Zwalnia unikalną nazwę koła (Kolo.name jest @unique) przy archiwizacji -
+   * bez tego nikt nigdy nie założyłby koła o nazwie odrzuconej/rozwiązanej.
+   */
+  async _archivedKoloName(name, koloId, suffix) {
+    if (name.includes(`#${suffix}-`)) return name; // już zarchiwizowana (ponowne wywołanie)
+    const base = `${name}#${suffix}-${koloId.slice(0, 6)}`;
+    const taken = await prisma.kolo.findUnique({ where: { name: base } });
+    return taken ? `${base}-${Date.now().toString(36)}` : base;
+  }
 
-    for (const channelId of [kolo.channelAnnouncements, kolo.channelChat, kolo.channelResearch, kolo.channelManage, kolo.channelDocuments, kolo.channelVoice]) {
-      if (!channelId) continue;
-      const channel = await guild.channels.fetch(channelId).catch(() => null);
-      await channel?.delete("Koło Naukowe rozwiązane").catch(() => null);
-    }
-    if (kolo.categoryId) {
-      const category = await guild.channels.fetch(kolo.categoryId).catch(() => null);
-      await category?.delete("Koło Naukowe rozwiązane").catch(() => null);
-    }
+  /**
+   * Definitywne zamknięcie koła: baza (status, zwolnienie nazwy, USUNIĘCIE
+   * członków wraz z przydziałami do badań, wygaszenie wiszących zaproszeń,
+   * zamknięcie otwartych próśb) + best-effort usunięcie kategorii/kanałów/
+   * ról na serwerze Kół.
+   *
+   * KOLEJNOŚĆ JEST CELOWA: najpierw baza, potem Discord. W starej wersji
+   * sprzątanie bazy było na końcu, więc brak dostępu do serwera Kół (bot
+   * nie w cache / brak KOLA_GUILD_ID) albo jakikolwiek błąd podczas
+   * usuwania ról przerywał funkcję PRZED transakcją. Efekt: koło znikało
+   * z kanałów, a bot dalej myślał, że wszyscy są jego członkami - nikt nie
+   * mógł założyć nowego koła ani przyjąć zaproszenia. Teraz infrastruktura
+   * Discorda to tylko dodatek (guild może być nullem), a źródłem prawdy o
+   * członkostwie jest baza i to ona jest sprzątana zawsze.
+   *
+   * @param {object|null} guild serwer Kół (KOLA_GUILD_ID) albo null
+   * @param {object} kolo
+   * @param {object} [opts]
+   * @param {"DISSOLVED"|"REJECTED"} [opts.finalStatus]
+   * @param {string} [opts.nameSuffix]
+   * @returns {Promise<{members: object[], archivedName: string, discordCleaned: boolean}>}
+   */
+  async _teardownKolo(guild, kolo, { finalStatus = "DISSOLVED", nameSuffix = "rozwiazane" } = {}) {
+    // Członków pobieramy PRZED usunięciem wpisów - wołający wysyła im DM-y.
+    const members = await prisma.koloMember.findMany({ where: { koloId: kolo.id } });
+    const archivedName = await this._archivedKoloName(kolo.name, kolo.id, nameSuffix);
+    const researchIds = (
+      await prisma.research.findMany({ where: { koloId: kolo.id }, select: { id: true } })
+    ).map((r) => r.id);
 
-    // Nazwa jest @unique - rozwiązane koło musi ją zwolnić. Członków i
-    // wiszące zaproszenia czyścimy, żeby reguła "jedno koło" nie blokowała
-    // byłych członków na zawsze.
+    // 1) BAZA - autorytatywne "kto jest w kole". Jedna transakcja, żeby nie
+    //    został stan pośredni (np. członkowie usunięci, ale status stary).
     await prisma.$transaction([
-      prisma.kolo.update({ where: { id: kolo.id }, data: { status: "DISSOLVED", name: `${kolo.name}#rozwiazane-${kolo.id.slice(0, 6)}` } }),
+      prisma.kolo.update({
+        where: { id: kolo.id },
+        data: { status: finalStatus, name: archivedName, belowMinSince: null },
+      }),
       prisma.koloMember.deleteMany({ where: { koloId: kolo.id } }),
+      ...(researchIds.length > 0
+        ? [prisma.researchMember.deleteMany({ where: { researchId: { in: researchIds } } })]
+        : []),
       prisma.koloInvite.updateMany({ where: { koloId: kolo.id, status: "PENDING" }, data: { status: "EXPIRED" } }),
+      prisma.koloChangeRequest.updateMany({ where: { koloId: kolo.id, status: "PENDING_REVIEW" }, data: { status: "REJECTED" } }),
     ]);
+
+    // 2) DISCORD - best-effort. Koło w PENDING_MEMBERS/REJECTED nie ma tu
+    //    nic (wszystkie ID są null), więc pętle po prostu nic nie robią.
+    let discordCleaned = false;
+    if (guild) {
+      try {
+        const customRoles = await prisma.koloCustomRole.findMany({ where: { koloId: kolo.id } });
+        for (const roleId of [kolo.roleIdDivider, kolo.roleIdLeader, kolo.roleIdVice, kolo.roleIdMember, ...customRoles.map((r) => r.roleId)]) {
+          if (!roleId) continue;
+          const role = await guild.roles.fetch(roleId).catch(() => null);
+          await role?.delete("Koło Naukowe rozwiązane").catch(() => null);
+        }
+
+        for (const channelId of [kolo.channelAnnouncements, kolo.channelChat, kolo.channelResearch, kolo.channelManage, kolo.channelDocuments, kolo.channelVoice]) {
+          if (!channelId) continue;
+          const channel = await guild.channels.fetch(channelId).catch(() => null);
+          await channel?.delete("Koło Naukowe rozwiązane").catch(() => null);
+        }
+        if (kolo.categoryId) {
+          const category = await guild.channels.fetch(kolo.categoryId).catch(() => null);
+          await category?.delete("Koło Naukowe rozwiązane").catch(() => null);
+        }
+        discordCleaned = true;
+      } catch (err) {
+        // Baza jest już posprzątana - to tylko estetyka po stronie Discorda.
+        await logError("koloService", "TEARDOWN_DISCORD_ERROR", err.message, { koloId: kolo.id, finalStatus, stack: err.stack });
+      }
+    } else if (kolo.categoryId || kolo.roleIdDivider || kolo.channelChat || kolo.channelManage) {
+      // Koło miało infrastrukturę, a nie ma jak jej usunąć - baza jest
+      // czysta (nikt już w nim nie figuruje), ale kanały/role zostaną na
+      // serwerze, dopóki ktoś ich nie skasuje ręcznie.
+      await logError(
+        "koloService",
+        "TEARDOWN_NO_KOLA_GUILD",
+        "Serwer Kół Naukowych niedostępny - członkostwa i status wyczyszczone w bazie, ale kanały/role koła mogły zostać (do ręcznego usunięcia).",
+        { koloId: kolo.id, finalStatus },
+        "WARNING"
+      );
+    }
+
+    return { members, archivedName, discordCleaned };
+  }
+
+  /**
+   * Pełne rozwiązanie/odrzucenie koła: baza + Discord + DM do WSZYSTKICH
+   * członków + wpis w ActionLog. Wspólny punkt dla każdej ścieżki kończącej
+   * życie koła (zgoda admina na rozwiązanie, auto-rozwiązanie po 72h,
+   * auto-odrzucenie zgłoszenia bez kompletu, wycofanie zgłoszenia przez
+   * lidera), żeby żadna z nich nie zostawiła ludzi w nieistniejącym kole.
+   *
+   * @param {object} client
+   * @param {object} kolo
+   * @param {object} [opts]
+   * @param {"DISSOLVED"|"REJECTED"} [opts.finalStatus]
+   * @param {string} [opts.nameSuffix]
+   * @param {string|null} [opts.dmText] treść DM do każdego (byłego) członka
+   * @param {string} [opts.actorId]
+   * @param {string} [opts.action]
+   */
+  async _dissolveKolo(client, kolo, { finalStatus = "DISSOLVED", nameSuffix = "rozwiazane", dmText = null, actorId = "system", action = "kolo_auto_dissolved" } = {}) {
+    const guild = getKolaGuild(client);
+    const result = await this._teardownKolo(guild, kolo, { finalStatus, nameSuffix });
+
+    if (dmText) {
+      for (const m of result.members) {
+        const user = await client.users.fetch(m.userId).catch(() => null);
+        await user?.send(dmText).catch(() => null);
+      }
+    }
+
+    await logAction(action, actorId, kolo.id, {
+      name: kolo.name,
+      finalStatus,
+      freedMembers: result.members.map((m) => m.userId),
+      discordCleaned: result.discordCleaned,
+    });
+    return result;
   }
 
   // handleChangeReview obsługuje NAME/LOGO/LEADER/NEW_ROLE; DISSOLVE ma inny efekt (usuwanie),
@@ -1119,15 +1425,24 @@ class KoloService {
       if (request.status !== "PENDING_REVIEW") {
         return interaction.followUp({ content: "❌ Ta prośba została już rozpatrzona.", ephemeral: true });
       }
+      if (DEAD_KOLO_STATUSES.includes(request.kolo?.status)) {
+        // Koło zdążyło zakończyć żywot inną drogą (np. auto-odrzucenie po
+        // 72h) - zamykamy tylko samą prośbę i zdejmujemy przyciski.
+        await prisma.koloChangeRequest.update({ where: { id: requestId }, data: { status: "REJECTED" } });
+        return interaction.editReply({ components: [] });
+      }
+
       await prisma.koloChangeRequest.update({ where: { id: requestId }, data: { status: approve ? "APPROVED" : "REJECTED" } });
       if (approve) {
-        const members = await prisma.koloMember.findMany({ where: { koloId: request.koloId } });
-        const kolaGuild = getKolaGuild(interaction.client);
-        if (kolaGuild) await this._teardownKolo(kolaGuild, request.kolo);
-        for (const m of members) {
-          const user = await interaction.client.users.fetch(m.userId).catch(() => null);
-          await user?.send(`💥 Koło **${request.kolo.name}** zostało rozwiązane przez administrację.`).catch(() => null);
-        }
+        await this._dissolveKolo(interaction.client, request.kolo, {
+          finalStatus: "DISSOLVED",
+          nameSuffix: "rozwiazane",
+          dmText:
+            `💥 Koło **${request.kolo.name}** zostało rozwiązane przez administrację. ` +
+            "Nie należysz już do żadnego koła - możesz założyć nowe albo przyjąć zaproszenie do istniejącego.",
+          actorId: interaction.user.id,
+          action: "kolo_dissolved",
+        });
       }
       return interaction.editReply({ components: [] });
     }
@@ -1220,6 +1535,12 @@ class KoloService {
       const research = await prisma.research.findUnique({ where: { id: researchId }, include: { kolo: true } });
       if (!research || research.status !== "PENDING_REVIEW") {
         return interaction.followUp({ content: "❌ To zgłoszenie zostało już rozpatrzone.", ephemeral: true });
+      }
+      if (DEAD_KOLO_STATUSES.includes(research.kolo?.status)) {
+        // Koło zdążyło zostać odrzucone/rozwiązane - jego badania nie mają
+        // już gdzie żyć (kanały i członkowie zniknęli).
+        await prisma.research.update({ where: { id: researchId }, data: { status: "REJECTED" } });
+        return interaction.editReply({ components: [] });
       }
 
       const updated = await prisma.research.update({
@@ -1316,12 +1637,10 @@ class KoloService {
    * członków (lider doprasza brakujące osoby po odrzutach).
    */
   async _getInvitableKolo(userId) {
-    const membership = await prisma.koloMember.findFirst({
-      where: { userId, role: { in: ["LEADER", "VICE_LEADER"] } },
-      include: { kolo: true },
+    return this._findLiveMembership(userId, {
+      roles: ["LEADER", "VICE_LEADER"],
+      statuses: ["ACTIVE", "PENDING_MEMBERS"],
     });
-    if (!membership || !["ACTIVE", "PENDING_MEMBERS"].includes(membership.kolo.status)) return null;
-    return membership;
   }
 
   async cmdInvite(interaction) {
@@ -1399,8 +1718,8 @@ class KoloService {
 
     if (sub === "lista") {
       // Podgląd dla każdego członka aktywnego koła (nie tylko zarządu).
-      const membership = await prisma.koloMember.findFirst({ where: { userId: interaction.user.id }, include: { kolo: true } });
-      if (!membership || membership.kolo.status !== "ACTIVE") {
+      const membership = await this._findLiveMembership(interaction.user.id, { statuses: ["ACTIVE"] });
+      if (!membership) {
         return interaction.editReply({ content: "❌ Nie należysz do żadnego aktywnego koła." });
       }
       const researches = await prisma.research.findMany({ where: { koloId: membership.koloId }, orderBy: { createdAt: "desc" } });
@@ -1453,58 +1772,127 @@ class KoloService {
   }
 
   /**
-   * /kolo opusc - dobrowolne odejście z koła (każdy oprócz lidera;
-   * lider musi najpierw przekazać koło albo je rozwiązać).
+   * /kolo opusc - dobrowolne odejście z koła.
+   *  - członek/wicelider: wychodzi z koła ACTIVE albo ze zgłoszenia w
+   *    PENDING_MEMBERS (przyjął zaproszenie, ale się rozmyślił) - bez tego
+   *    tkwiłby w cudzym zgłoszeniu i nie mógł dołączyć nigdzie indziej,
+   *  - lider AKTYWNEGO koła: nie może (musi przekazać koło albo rozwiązać),
+   *  - lider zgłoszenia w PENDING_MEMBERS: wycofuje CAŁE zgłoszenie (koło
+   *    dostaje REJECTED, członkostwa i zaproszenia są czyszczone, a
+   *    zaproszeni dostają DM) - inaczej byłby zablokowany aż do
+   *    auto-odrzucenia zgłoszenia.
    */
   async cmdLeave(interaction) {
     await interaction.deferReply({ ephemeral: true });
-    const membership = await prisma.koloMember.findFirst({ where: { userId: interaction.user.id }, include: { kolo: true } });
-    if (!membership || membership.kolo.status !== "ACTIVE") {
-      return interaction.editReply({ content: "❌ Nie należysz do żadnego aktywnego koła." });
-    }
-    if (membership.role === "LEADER") {
-      return interaction.editReply({ content: "❌ Lider nie może opuścić koła. Przekaż najpierw rolę lidera (`/kolo prosba` → Lider) albo rozwiąż koło z kanału ⚒️zarządzaj-kołem." });
+    const membership = await this._findLiveMembership(interaction.user.id);
+    if (!membership) {
+      return interaction.editReply({ content: "❌ Nie należysz do żadnego koła naukowego." });
     }
     const kolo = membership.kolo;
+
+    if (membership.role === "LEADER" && kolo.status === "ACTIVE") {
+      return interaction.editReply({ content: "❌ Lider nie może opuścić koła. Przekaż najpierw rolę lidera (`/kolo prosba` → Lider) albo rozwiąż koło z kanału ⚒️zarządzaj-kołem." });
+    }
+
+    if (membership.role === "LEADER" && kolo.status === "PENDING_MEMBERS") {
+      await this._dissolveKolo(interaction.client, kolo, {
+        finalStatus: "REJECTED",
+        nameSuffix: "wycofane",
+        dmText: `🚫 Lider wycofał(a) zgłoszenie koła **${kolo.name}** - koło nie powstanie. Nie należysz już do żadnego koła.`,
+        actorId: interaction.user.id,
+        action: "kolo_application_withdrawn",
+      });
+      return interaction.editReply({
+        content: `✅ Zgłoszenie koła **${kolo.name}** zostało wycofane. Nazwa jest znów wolna, a Ty (i zaproszone osoby) nie należycie już do żadnego koła.`,
+      });
+    }
+
+    if (kolo.status === "PENDING_REVIEW") {
+      return interaction.editReply({
+        content: "❌ Zgłoszenie koła czeka już na decyzję administracji - nie można z niego teraz wyjść. Poproś lidera o wycofanie zgłoszenia (`/kolo opusc` u lidera).",
+      });
+    }
+
+    const isApplication = kolo.status === "PENDING_MEMBERS";
     await prisma.koloMember.delete({ where: { id: membership.id } });
     const researchIds = (await prisma.research.findMany({ where: { koloId: kolo.id }, select: { id: true } })).map((r) => r.id);
     if (researchIds.length > 0) {
       await prisma.researchMember.deleteMany({ where: { researchId: { in: researchIds }, userId: interaction.user.id } });
     }
-    const guild = getKolaGuild(interaction.client);
-    if (guild) {
-      const member = await guild.members.fetch(interaction.user.id).catch(() => null);
-      for (const roleId of [kolo.roleIdDivider, kolo.roleIdLeader, kolo.roleIdVice, kolo.roleIdMember]) {
-        if (roleId) await member?.roles.remove(roleId).catch(() => null);
+    // Role istnieją dopiero od momentu aktywacji koła - przy zgłoszeniu w
+    // PENDING_MEMBERS nie ma czego zdejmować (i nie niepokojmy serwera Kół).
+    if (!isApplication) {
+      const guild = getKolaGuild(interaction.client);
+      if (guild) {
+        const member = await guild.members.fetch(interaction.user.id).catch(() => null);
+        for (const roleId of [kolo.roleIdDivider, kolo.roleIdLeader, kolo.roleIdVice, kolo.roleIdMember]) {
+          if (roleId) await member?.roles.remove(roleId).catch(() => null);
+        }
+        const customRoles = await prisma.koloCustomRole.findMany({ where: { koloId: kolo.id } });
+        for (const cr of customRoles) await member?.roles.remove(cr.roleId).catch(() => null);
       }
-      const customRoles = await prisma.koloCustomRole.findMany({ where: { koloId: kolo.id } });
-      for (const cr of customRoles) await member?.roles.remove(cr.roleId).catch(() => null);
     }
     await this._checkMinimumMembers(interaction.client, kolo.id);
-    await logAction("kolo_member_left", interaction.user.id, kolo.id, {});
-    return interaction.editReply({ content: `✅ Opuściłeś koło **${kolo.name}**.` });
+    await logAction("kolo_member_left", interaction.user.id, kolo.id, { koloStatus: kolo.status });
+    return interaction.editReply({
+      content: isApplication
+        ? `✅ Wypisałeś(aś) się ze zgłoszenia koła **${kolo.name}**. Nie należysz już do żadnego koła.`
+        : `✅ Opuściłeś koło **${kolo.name}**.`,
+    });
   }
 
   // ==================== POMOCNICZE ====================
 
+  /**
+   * Wspólny licznik "poniżej minimum" (Kolo.belowMinSince) - dotyczy i
+   * AKTYWNYCH kół, i ZGŁOSZEŃ zbierających członków:
+   *   - ACTIVE: ktoś odpadł (wyrzucenie/opuszczenie) i jest mniej niż
+   *     lider + 3 osoby,
+   *   - PENDING_MEMBERS: zaproszeni odrzucili zaproszenia albo pozwolili im
+   *     wygasnąć, więc komplet się nie zebrał.
+   * Dopóki wiszą ważne zaproszenia (PENDING_MEMBERS), licznik nie tyka -
+   * jest jeszcze szansa na komplet. Gdy wystartuje, lider ma 72h na
+   * doproszenie kogoś, a potem koloScheduler kończy koło (ACTIVE ->
+   * DISSOLVED, PENDING_MEMBERS -> REJECTED) i czyści członkostwa, więc nikt
+   * nie zostaje "w kole", którego już nie ma.
+   */
   async _checkMinimumMembers(client, koloId) {
     const kolo = await prisma.kolo.findUnique({ where: { id: koloId }, include: { members: true } });
-    if (!kolo || kolo.status !== "ACTIVE") return;
+    if (!kolo || !["ACTIVE", "PENDING_MEMBERS"].includes(kolo.status)) return;
 
     const minRequired = MIN_INVITED + 1; // lider + min. 3
-    if (kolo.members.length < minRequired) {
-      if (!kolo.belowMinSince) {
-        await prisma.kolo.update({ where: { id: koloId }, data: { belowMinSince: new Date() } });
-        const leader = await client.users.fetch(kolo.leaderId).catch(() => null);
-        await leader
-          ?.send(
-            `⚠️ Koło **${kolo.name}** spadło poniżej wymaganego minimum (${minRequired} osób). ` +
-              "Masz 72h, aby uzupełnić braki (zaproś kogoś przez kanał ⚒️zarządzaj-kołem), inaczej koło zostanie automatycznie rozwiązane."
-          )
-          .catch(() => null);
+    const clearCounter = async () => {
+      if (kolo.belowMinSince) await prisma.kolo.update({ where: { id: koloId }, data: { belowMinSince: null } });
+    };
+
+    if (kolo.members.length >= minRequired) {
+      await clearCounter();
+      return;
+    }
+
+    if (kolo.status === "PENDING_MEMBERS") {
+      const liveInvites = await prisma.koloInvite.count({
+        where: { koloId, status: "PENDING", expiresAt: { gt: new Date() } },
+      });
+      if (liveInvites > 0) {
+        await clearCounter();
+        return;
       }
-    } else if (kolo.belowMinSince) {
-      await prisma.kolo.update({ where: { id: koloId }, data: { belowMinSince: null } });
+    }
+
+    if (!kolo.belowMinSince) {
+      await prisma.kolo.update({ where: { id: koloId }, data: { belowMinSince: new Date() } });
+      const leader = await client.users.fetch(kolo.leaderId).catch(() => null);
+      await leader
+        ?.send(
+          kolo.status === "PENDING_MEMBERS"
+            ? `⚠️ Zgłoszenie koła **${kolo.name}** nie zebrało wymaganej liczby członków (${kolo.members.length}/${minRequired}). ` +
+              "Masz 72h, żeby doprosić brakujące osoby (`/kolo zaprosz`) - inaczej zgłoszenie zostanie automatycznie odrzucone, " +
+              "a wszyscy (łącznie z Tobą) zostaną z niego zwolnieni."
+            : `⚠️ Koło **${kolo.name}** spadło poniżej wymaganego minimum (${minRequired} osób). ` +
+              "Masz 72h, aby uzupełnić braki (zaproś kogoś przez kanał ⚒️zarządzaj-kołem), inaczej koło zostanie automatycznie rozwiązane."
+        )
+        .catch(() => null);
     }
   }
 
