@@ -93,7 +93,7 @@ const { detectDominantColor } = require("../utils/dominantColor");
 const { generateBanner } = require("../utils/banner");
 const { getKolaGuild } = require("../config/kolaGuild");
 
-const MIN_INVITED = 3; // + lider = min. 4 osoby
+const MIN_INVITED = 0; // + lider = min. 4 osoby
 const MAX_MEMBERS = 15;
 
 // Statusy, w których koło naprawdę istnieje - tylko wtedy członkostwo
