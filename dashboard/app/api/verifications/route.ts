@@ -6,7 +6,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '@/lib/auth';
-import { hasPermission } from '@/lib/permissions';
+import { hasAnyPermission } from '@/lib/permissions';
+
+// Zgodnie z botem: weryfikacje rozpatruje Support i wyżej (albo legacy MODERATE).
+const REVIEW_KEYS = ['MODERATE', 'SUPPORT'];
 
 // Lokalne enumy zamiast importu z @prisma/client — unikamy problemów
 // gdy prisma generate jeszcze nie wygenerował typów (np. świeży build).
@@ -18,7 +21,7 @@ export async function GET(req: NextRequest) {
     if (!session?.user?.discordId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     // Sprawdź uprawnienia
-    const hasPerm = await hasPermission(session.user.discordId, 'MODERATE');
+    const hasPerm = await hasAnyPermission(session.user.discordId, REVIEW_KEYS);
     if (!hasPerm) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
     // Frontend wysyła małe litery (?status=pending) - mapujemy na enumy.

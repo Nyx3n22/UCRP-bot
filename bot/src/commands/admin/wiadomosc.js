@@ -15,7 +15,7 @@ const {
   ActionRowBuilder,
   EmbedBuilder,
 } = require("discord.js");
-const { hasPermission } = require("../../config/roles");
+const { hasAnyPermission } = require("../../config/roles");
 const ui = require("../../utils/embeds");
 
 module.exports = {
@@ -36,9 +36,15 @@ module.exports = {
     ),
 
   async execute(interaction) {
-    if (!(await hasPermission(interaction.member, "MANAGE_TECH")) && !(await hasPermission(interaction.member, "MODERATE"))) {
+    // Główny Developer (MANAGE_TECH), administracja z hierarchii
+    // (MANAGE_CHANNELS od Młodszego Administratora) albo moderacja.
+    if (!(await hasAnyPermission(interaction.member, ["MANAGE_TECH", "MODERATE", "MANAGE_CHANNELS"]))) {
       return interaction.reply({
-        embeds: [ui.noPermission("Wysyłanie wiadomości wymaga uprawnienia **MANAGE_TECH** lub **MODERATE**.")],
+        embeds: [
+          ui.noPermission(
+            "Wysyłanie wiadomości wymaga uprawnienia **MANAGE_TECH**, **MODERATE** albo **MANAGE_CHANNELS** (ranga: Młodszy Administrator lub wyższa)."
+          ),
+        ],
         ephemeral: true,
       });
     }

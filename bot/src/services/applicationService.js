@@ -8,7 +8,7 @@
  */
 
 const prisma = require("../lib/prisma");
-const { getRoleIdForPermission, PERMISSION_KEYS } = require("../config/roles");
+const { getRoleIdForPermission, PERMISSION_KEYS, isDividerRole } = require("../config/roles");
 
 const ROLE_ON_ACCEPT = {
   STUDENT: PERMISSION_KEYS.STUDENT_ROLE,
@@ -31,8 +31,13 @@ class ApplicationService {
       const permissionKey = ROLE_ON_ACCEPT[application.type];
       const roleId = permissionKey ? await getRoleIdForPermission(permissionKey) : null;
       if (roleId) {
-        const member = await guild.members.fetch(application.userId).catch(() => null);
-        await member?.roles.add(roleId).catch(() => null);
+        // Ochrona przed pomyłką w Dashboardzie: przegródka („•══════• X •══════•")
+        // nie może zostać nikomu nadana, nawet jeśli ktoś ją powiąże.
+        const role = await guild?.roles?.fetch?.(roleId).catch(() => null);
+        if (!isDividerRole(role)) {
+          const member = await guild.members.fetch(application.userId).catch(() => null);
+          await member?.roles.add(roleId).catch(() => null);
+        }
       }
     }
 

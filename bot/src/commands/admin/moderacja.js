@@ -4,7 +4,7 @@
  */
 
 const { SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
-const { hasPermission } = require("../../config/roles");
+const { hasAnyPermission, KEY_SETS } = require("../../config/roles");
 const punishmentService = require("../../services/punishmentService");
 const prisma = require("../../lib/prisma");
 const ui = require("../../utils/embeds");
@@ -20,6 +20,37 @@ function moderationEmbed({ icon, title, targetId, reason, moderatorId, color, th
 }
 
 const HIERARCHY_HINT = "Najczęstsze przyczyny: brak uprawnień bota albo **wyższa rola** ukaranego.";
+
+/**
+ * Jakie uprawnienie wymagane jest dla danej podkomendy.
+ *
+ * Komenda honoruje RANGI z hierarchii staffu przez uprawnienia
+ * granularne: Młodszy Moderator ma TIMEOUT_MEMBERS/CLEAR_MESSAGES,
+ * Moderator dokłada KICK_MEMBERS, Starszy Moderator — BAN_MEMBERS.
+ * Stary klucz MODERATE nadal działa (LEGACY_COMPAT w config/roles.js),
+ * więc istniejące powiązania ról nie wymagają przepinania.
+ */
+const SUB_PERMISSIONS = {
+  ban: { keys: ["BAN_MEMBERS"], hint: "Ranga: **Starszy Moderator** lub wyższa (ew. rola z BAN_MEMBERS)." },
+  kick: { keys: ["KICK_MEMBERS"], hint: "Ranga: **Moderator** lub wyższa (ew. rola z KICK_MEMBERS)." },
+  mute: { keys: ["TIMEOUT_MEMBERS"], hint: "Ranga: **Młodszy Moderator** lub wyższa (ew. rola z TIMEOUT_MEMBERS)." },
+  clear: { keys: ["CLEAR_MESSAGES"], hint: "Ranga: **Młodszy Moderator** lub wyższa (ew. rola z CLEAR_MESSAGES)." },
+  ogloszenie: {
+    // MLODSZY_ADMINISTRATOR to najniższa akceptowalna ranga — pokrywa też
+    // wszystkie wyższe, bo te dziedziczą ją przez hierarchię.
+    keys: ["MODERATE", "MANAGE_DEANERY", "MANAGE_PROJECT", "MLODSZY_ADMINISTRATOR"],
+    hint: "Ogłoszenia publikuje Dziekanat, Zarząd Projektu albo Administracja (Młodszy Administrator i wyżej).",
+  },
+};
+
+/**
+ * Kary o najwyższej wadze (zawieszenie/wydalenie): Władze Uczelni, zarząd
+ * projektu i administracja. MLODSZY_ADMINISTRATOR / MANAGER_PROJEKTU to
+ * najniższe akceptowalne rangi — wyższe dziedziczą je przez hierarchię.
+ */
+const HIGH_PUNISHMENT_KEYS = ["MANAGE_DEANERY", "MANAGER_PROJEKTU", "MLODSZY_ADMINISTRATOR"];
+/** Zwykłe kary dyscyplinarne (upomnienie/nagana) — każdy, kto moderuje. */
+const PUNISHMENT_KEYS = KEY_SETS.MODERATION;
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -82,9 +113,15 @@ module.exports = {
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
 
-    if (!(await hasPermission(interaction.member, "MODERATE")) && sub !== "kara") {
+    // „kara" sprawdza uprawnienia sama (inne wagi kar wymagają innych rang).
+    const required = SUB_PERMISSIONS[sub];
+    if (required && !(await hasAnyPermission(interaction.member, required.keys))) {
       return interaction.reply({
-        embeds: [ui.noPermission("Narzędzia moderacyjne wymagają uprawnienia **MODERATE**.")],
+        embeds: [
+          ui.noPermission(
+            `To narzędzie wymaga uprawnienia **${required.keys.join("** / **")}**. ${required.hint ?? ""}`
+          ),
+        ],
         ephemeral: true,
       });
     }
@@ -181,12 +218,17 @@ module.exports = {
     const severity = interaction.options.getString("rodzaj");
     const reason = interaction.options.getString("powod");
 
-    // Wydalenie i zawieszenie wymagają wyższych uprawnień (Władze Uczelni), reszta - moderacji
+    // Wydalenie i zawieszenie wymagają wyższych uprawnień (Władze Uczelni albo
+    // góra hierarchii staffu), reszta - dowolnej rangi moderacyjnej.
     const requiresHighAuth = severity === "WYDALENIE" || severity === "ZAWIESZENIE";
-    const permKey = requiresHighAuth ? "MANAGE_DEANERY" : "MODERATE";
-    if (!(await hasPermission(interaction.member, permKey))) {
+    const permKeys = requiresHighAuth ? HIGH_PUNISHMENT_KEYS : PUNISHMENT_KEYS;
+    if (!(await hasAnyPermission(interaction.member, permKeys))) {
       return interaction.reply({
-        embeds: [ui.noPermission(`Kara **${severity}** wymaga uprawnienia **${permKey}**.`)],
+        embeds: [
+          ui.noPermission(
+            `Kara **${severity}** wymaga jednego z uprawnień: **${permKeys.join("** / **")}**.`
+          ),
+        ],
         ephemeral: true,
       });
     }

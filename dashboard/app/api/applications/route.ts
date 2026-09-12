@@ -7,7 +7,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '@/lib/auth';
-import { hasPermission } from '@/lib/permissions';
+import { hasAnyPermission } from '@/lib/permissions';
+
+// Zgodnie z botem: podania rozpatruje rekrutacja (REVIEW_APPLICATIONS) albo
+// Support/Administracja w górę hierarchii.
+const REVIEW_KEYS = ['REVIEW_APPLICATIONS', 'SUPPORT', 'ADMINISTRATOR'];
 import { addGuildMemberRole, sendUserDm } from '@/lib/discord';
 
 // Lokalne enumy zamiast importu z @prisma/client — unikamy problemów
@@ -34,7 +38,7 @@ export async function GET(req: NextRequest) {
     const session = await getServerSession(authOptions);
     if (!session?.user?.discordId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const hasPerm = await hasPermission(session.user.discordId, 'REVIEW_APPLICATIONS');
+    const hasPerm = await hasAnyPermission(session.user.discordId, REVIEW_KEYS);
     if (!hasPerm) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
     const statusParam = (req.nextUrl.searchParams.get('status') || 'all').toLowerCase();
@@ -69,7 +73,7 @@ export async function PATCH(req: NextRequest) {
     if (!session?.user?.discordId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const reviewerId = session.user.discordId;
-    const hasPerm = await hasPermission(reviewerId, 'REVIEW_APPLICATIONS');
+    const hasPerm = await hasAnyPermission(reviewerId, REVIEW_KEYS);
     if (!hasPerm) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
     const body = await req.json().catch(() => ({}));
