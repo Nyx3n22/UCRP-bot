@@ -5,7 +5,7 @@
  * niż reszta bota (weryfikacja, tickety, aplikacje itd. - te zostają na
  * głównym GUILD_ID). ID drugiego serwera: zmienna środowiskowa
  * KOLA_GUILD_ID (patrz config/kolaGuild.js) - bot musi być tam zaproszony
- * z uprawnieniami Manage Roles + Manage Channels.
+ * z uprawnieniami Manage Roles + Manage Channels.The Justice Initiative
  *
  * Flow:
  *   1) Bot wysyła panel (przycisk) na kanał KOLA_NAUKOWE (główny serwer,
@@ -93,7 +93,7 @@ const { detectDominantColor } = require("../utils/dominantColor");
 const { generateBanner } = require("../utils/banner");
 const { getKolaGuild } = require("../config/kolaGuild");
 
-const MIN_INVITED = 0; // + lider = min. 4 osoby
+const MIN_INVITED = 3; // + lider = min. 4 osoby
 const MAX_MEMBERS = 15;
 
 // Statusy, w których koło naprawdę istnieje - tylko wtedy członkostwo
