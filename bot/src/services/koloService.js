@@ -85,7 +85,7 @@ const {
   PermissionFlagsBits,
 } = require("discord.js");
 const prisma = require("../lib/prisma");
-const { hasPermission } = require("../config/roles");
+const { hasAnyPermission, KEY_SETS } = require("../config/roles");
 const { getBoundChannelId } = require("../config/channels");
 const { generateAiReply } = require("./aiGatewayService");
 const { logError, logAction } = require("./../utils/logger");
@@ -660,7 +660,9 @@ class KoloService {
   async handleApplicationReview(interaction, koloId, approve) {
     await interaction.deferUpdate();
     try {
-      if (!(await hasPermission(interaction.member, "MODERATE"))) {
+      // Recenzja zgłoszeń koła: dowolna ranga moderacyjna (Młodszy Moderator
+      // i wyżej) albo stary klucz MODERATE.
+      if (!(await hasAnyPermission(interaction.member, KEY_SETS.MODERATION))) {
         return interaction.followUp({ content: "❌ Nie masz uprawnień do rozpatrywania kół naukowych.", ephemeral: true });
       }
 
@@ -1397,7 +1399,9 @@ class KoloService {
   async handleChangeReview(interaction, requestId, approve) {
     await interaction.deferUpdate();
     try {
-      if (!(await hasPermission(interaction.member, "MODERATE"))) {
+      // Recenzja zgłoszeń koła: dowolna ranga moderacyjna (Młodszy Moderator
+      // i wyżej) albo stary klucz MODERATE.
+      if (!(await hasAnyPermission(interaction.member, KEY_SETS.MODERATION))) {
         return interaction.followUp({ content: "❌ Nie masz uprawnień.", ephemeral: true });
       }
 
@@ -1655,7 +1659,9 @@ class KoloService {
     const request = await prisma.koloChangeRequest.findUnique({ where: { id: requestId }, include: { kolo: true } });
     if (request?.type === "DISSOLVE") {
       await interaction.deferUpdate();
-      if (!(await hasPermission(interaction.member, "MODERATE"))) {
+      // Recenzja zgłoszeń koła: dowolna ranga moderacyjna (Młodszy Moderator
+      // i wyżej) albo stary klucz MODERATE.
+      if (!(await hasAnyPermission(interaction.member, KEY_SETS.MODERATION))) {
         return interaction.followUp({ content: "❌ Nie masz uprawnień.", ephemeral: true });
       }
       if (request.status !== "PENDING_REVIEW") {
@@ -1768,7 +1774,9 @@ class KoloService {
   async handleResearchReview(interaction, researchId, approve) {
     await interaction.deferUpdate();
     try {
-      if (!(await hasPermission(interaction.member, "MODERATE"))) {
+      // Recenzja zgłoszeń koła: dowolna ranga moderacyjna (Młodszy Moderator
+      // i wyżej) albo stary klucz MODERATE.
+      if (!(await hasAnyPermission(interaction.member, KEY_SETS.MODERATION))) {
         return interaction.followUp({ content: "❌ Nie masz uprawnień.", ephemeral: true });
       }
       const research = await prisma.research.findUnique({ where: { id: researchId }, include: { kolo: true } });

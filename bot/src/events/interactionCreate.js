@@ -11,9 +11,17 @@ const koloService = require("../services/koloService");
 const partnerstwoService = require("../services/partnerstwoService");
 const ticketService = require("../services/ticketService");
 const { getBoundChannelId } = require("../config/channels");
-const { hasPermission } = require("../config/roles");
+const { hasAnyPermission, KEY_SETS } = require("../config/roles");
 const { logError } = require("../utils/logger");
 const ui = require("../utils/embeds");
+
+/**
+ * Kto może rozpatrywać ręczną weryfikację / podania. Zestawy kluczy są
+ * współdzielone z resztą bota (config/roles.js -> KEY_SETS), żeby ten sam
+ * próg obowiązywał w komendach i w obsłudze przycisków.
+ */
+const VERIFICATION_REVIEW_KEYS = KEY_SETS.VERIFICATION_REVIEW;
+const APPLICATION_REVIEW_KEYS = KEY_SETS.APPLICATION_REVIEW;
 
 module.exports = {
   name: "interactionCreate",
@@ -156,9 +164,13 @@ module.exports = {
 
       // ========== RECENZJA WERYFIKACJI ==========
       if (interaction.isButton() && interaction.customId.startsWith("verification_accept:")) {
-        if (!(await hasPermission(interaction.member, "MODERATE"))) {
+        if (!(await hasAnyPermission(interaction.member, VERIFICATION_REVIEW_KEYS))) {
           return interaction.reply({
-            embeds: [ui.noPermission("Rozpatrywanie weryfikacji wymaga uprawnienia **MODERATE**.")],
+            embeds: [
+              ui.noPermission(
+                "Rozpatrywanie weryfikacji wymaga rangi **Support** albo dowolnej rangi moderacyjnej (ew. uprawnienia **MODERATE**)."
+              ),
+            ],
             ephemeral: true,
           });
         }
@@ -167,9 +179,13 @@ module.exports = {
       }
 
       if (interaction.isButton() && interaction.customId.startsWith("verification_reject:")) {
-        if (!(await hasPermission(interaction.member, "MODERATE"))) {
+        if (!(await hasAnyPermission(interaction.member, VERIFICATION_REVIEW_KEYS))) {
           return interaction.reply({
-            embeds: [ui.noPermission("Rozpatrywanie weryfikacji wymaga uprawnienia **MODERATE**.")],
+            embeds: [
+              ui.noPermission(
+                "Rozpatrywanie weryfikacji wymaga rangi **Support** albo dowolnej rangi moderacyjnej (ew. uprawnienia **MODERATE**)."
+              ),
+            ],
             ephemeral: true,
           });
         }
@@ -178,9 +194,13 @@ module.exports = {
       }
 
       if (interaction.isButton() && interaction.customId.startsWith("verification_moreinfo:")) {
-        if (!(await hasPermission(interaction.member, "MODERATE"))) {
+        if (!(await hasAnyPermission(interaction.member, VERIFICATION_REVIEW_KEYS))) {
           return interaction.reply({
-            embeds: [ui.noPermission("Rozpatrywanie weryfikacji wymaga uprawnienia **MODERATE**.")],
+            embeds: [
+              ui.noPermission(
+                "Rozpatrywanie weryfikacji wymaga rangi **Support** albo dowolnej rangi moderacyjnej (ew. uprawnienia **MODERATE**)."
+              ),
+            ],
             ephemeral: true,
           });
         }
@@ -198,9 +218,13 @@ module.exports = {
         return applicationServiceV2.handleApplicationModalSubmit(interaction, type);
       }
       if (interaction.isButton() && (interaction.customId.startsWith("application_accept:") || interaction.customId.startsWith("application_reject:"))) {
-        if (!(await hasPermission(interaction.member, "REVIEW_APPLICATIONS"))) {
+        if (!(await hasAnyPermission(interaction.member, APPLICATION_REVIEW_KEYS))) {
           return interaction.reply({
-            embeds: [ui.noPermission("Rozpatrywanie podań wymaga uprawnienia **REVIEW_APPLICATIONS**.")],
+            embeds: [
+              ui.noPermission(
+                "Rozpatrywanie podań wymaga uprawnienia **REVIEW_APPLICATIONS** albo rangi **Support** / **Administrator** lub wyższej."
+              ),
+            ],
             ephemeral: true,
           });
         }

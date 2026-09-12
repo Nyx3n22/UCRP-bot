@@ -5,6 +5,8 @@
 require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
+const { Client, GatewayIntentBits, Partials, Collection, REST, Routes } = require("discord.js");
+const { loadCommands } = require("./lib/loadCommands");
 
 // Fail-fast: bez tych zmiennych bot i tak nie wystartuje, a błędy byłyby
 // kryptyczne (np. "Expected token to be set" z głębi REST).
@@ -22,7 +24,6 @@ process.on("uncaughtException", (err) => {
   console.error("❌ UncaughtException:", err);
   process.exit(1);
 });
-const { Client, GatewayIntentBits, Partials, Collection, REST, Routes } = require("discord.js");
 const { startSocialMediaScheduler } = require("./scheduler/socialMediaScheduler");
 const { startKoloScheduler } = require("./scheduler/koloScheduler");
 const { startHealthServer } = require("./healthServer");
@@ -46,33 +47,8 @@ const client = new Client({
 
 client.commands = new Collection();
 
-function loadCommands() {
-  const commandsPath = path.join(__dirname, "commands");
-  const categories = fs.readdirSync(commandsPath);
-  const commandData = [];
-
-  for (const category of categories) {
-    const categoryPath = path.join(commandsPath, category);
-    if (!fs.statSync(categoryPath).isDirectory()) continue;
-    const files = fs.readdirSync(categoryPath).filter((f) => f.endsWith(".js"));
-    for (const file of files) {
-      const command = require(path.join(categoryPath, file));
-      if (!command?.data?.name || typeof command.execute !== "function") {
-        console.warn(`⚠️ Pomijam ${category}/${file}: brak data.name lub execute().`);
-        continue;
-      }
-      // Komendy zakładają kontekst serwera (interaction.guild/member) - w DM
-      // crashowałyby na null. Blokujemy centralnie, z opt-out przez
-      // `allowDM = true` w module komendy.
-      if (!command.allowDM && typeof command.data.setDMPermission === "function") {
-        command.data.setDMPermission(false);
-      }
-      client.commands.set(command.data.name, command);
-      commandData.push(command.data.toJSON());
-    }
-  }
-  return commandData;
-}
+// Komendy wczytuje współdzielony loader (src/lib/loadCommands.js) — ten sam,
+// którego używa `npm run deploy`, żeby oba miejsca widziały te same komendy.
 
 function loadEvents() {
   const eventsPath = path.join(__dirname, "events");
@@ -108,7 +84,7 @@ async function registerSlashCommands(commandData) {
   try {
     console.log(`🔧 Start procesu. PORT z środowiska: ${process.env.PORT ?? "(brak - użyję domyślnego 3001)"}`);
     startHealthServer(); // najpierw otwieramy port - Render skanuje go od razu po starcie procesu
-    const commandData = loadCommands();
+    const commandData = loadCommands(client.commands);
     loadEvents();
     await client.login(process.env.DISCORD_TOKEN);
     await registerSlashCommands(commandData);

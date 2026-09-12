@@ -5,6 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
+    "deploy": "node src/deployCommands.js",
     "dev": "nodemon src/index.js",
     "test": "node --test test/*.test.js",
     "prisma:generate": "prisma generate --schema=../prisma/schema.prisma",

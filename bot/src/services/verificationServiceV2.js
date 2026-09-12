@@ -18,7 +18,7 @@ const prisma = require("../lib/prisma");
 const { generatePesel } = require("./peselGenerator");
 const { generateCaptcha } = require("../utils/captcha");
 const robloxClient = require("./robloxClient");
-const { getRoleIdForPermission, hasPermission } = require("../config/roles");
+const { getRoleIdForPermission, hasAnyPermission, KEY_SETS } = require("../config/roles");
 const { getBoundChannelId } = require("../config/channels");
 const { generateAiReply } = require("./aiGatewayService");
 const { logError, logAction } = require("../utils/logger");
@@ -729,7 +729,8 @@ Odpowiedź JSON: {"score": 0.0-1.0, "flags": ["lista_anomalii"], "reasoning": "k
     try {
       // Sprawdzenie uprawnień - bez tego każdy, kto widzi przyciski na kanale
       // recenzji, mógłby zaakceptować/odrzucić cudzą weryfikację.
-      const allowed = await hasPermission(interaction.member, "MODERATE");
+      // Support i wyżej (hierarchia) albo stare powiązania MODERATE.
+      const allowed = await hasAnyPermission(interaction.member, KEY_SETS.VERIFICATION_REVIEW);
       if (!allowed) {
         return interaction.editReply({
           content: "❌ Nie masz uprawnień do rozpatrywania weryfikacji.",

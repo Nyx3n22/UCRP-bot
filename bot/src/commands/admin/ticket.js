@@ -8,7 +8,11 @@
 
 const { SlashCommandBuilder } = require("discord.js");
 const ticketService = require("../../services/ticketService");
-const { hasPermission } = require("../../config/roles");
+const { hasAnyPermission, KEY_SETS } = require("../../config/roles");
+
+// Tickety obsługuje Support i wyżej — MANAGE_THREADS przychodzi z hierarchii
+// (Support, Młodszy Moderator+, Development), więc nie trzeba osobnego wpisu.
+const TICKET_STAFF_KEYS = KEY_SETS.TICKET_STAFF;
 const ui = require("../../utils/embeds");
 
 module.exports = {
@@ -22,9 +26,13 @@ module.exports = {
     const sub = interaction.options.getSubcommand();
 
     if (sub === "przypisz") {
-      if (!(await hasPermission(interaction.member, "MODERATE"))) {
+      if (!(await hasAnyPermission(interaction.member, TICKET_STAFF_KEYS))) {
         return interaction.reply({
-          embeds: [ui.noPermission("Przypisywanie ticketów wymaga uprawnienia **MODERATE**.")],
+          embeds: [
+            ui.noPermission(
+              "Przypisywanie ticketów wymaga rangi **Support** lub wyższej (ew. uprawnienia **MODERATE** / **MANAGE_THREADS**)."
+            ),
+          ],
           ephemeral: true,
         });
       }
@@ -41,9 +49,13 @@ module.exports = {
     }
 
     if (sub === "zamknij") {
-      if (!(await hasPermission(interaction.member, "MODERATE"))) {
+      if (!(await hasAnyPermission(interaction.member, TICKET_STAFF_KEYS))) {
         return interaction.reply({
-          embeds: [ui.noPermission("Zamykanie ticketów wymaga uprawnienia **MODERATE**.")],
+          embeds: [
+            ui.noPermission(
+              "Zamykanie ticketów wymaga rangi **Support** lub wyższej (ew. uprawnienia **MODERATE** / **MANAGE_THREADS**)."
+            ),
+          ],
           ephemeral: true,
         });
       }

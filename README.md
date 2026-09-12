@@ -12,9 +12,10 @@ uwrp-bot/
 ├── bot/                            # discord.js v14 (Node.js) — worker
 │   ├── src/
 │   │   ├── index.js                # bootstrap klienta, rejestracja handlerów
+│   │   ├── deployCommands.js       # `npm run deploy` — idempotentna rejestracja komend slash
 │   │   ├── config/
 │   │   │   ├── env.js               # walidacja zmiennych środowiskowych (zod)
-│   │   │   └── roles.js             # mapa hierarchii ról -> stałe/permissiony
+│   │   │   └── roles.js             # klucze uprawnień, hierarchia rang, przegródki
 │   │   ├── commands/
 │   │   │   ├── rp/
 │   │   │   │   ├── postac.js        # /postac
@@ -42,6 +43,9 @@ uwrp-bot/
 │   │   │   ├── ticketService.js
 │   │   │   ├── logService.js
 │   │   │   └── roleSyncService.js   # nasłuch zmian ról -> aktualizacja postaci
+│   │   ├── lib/
+│   │   │   ├── prisma.js            # singleton PrismaClient
+│   │   │   └── loadCommands.js      # współdzielony loader komend (index.js + deployCommands.js)
 │   │   ├── repositories/            # cienka warstwa nad Prisma (Repository Pattern)
 │   │   │   ├── userRepository.js
 │   │   │   ├── characterRepository.js
@@ -66,7 +70,8 @@ uwrp-bot/
     │   │   ├── characters/              # przeglądarka bazy postaci
     │   │   └── logs/                    # ActionLog
     │   └── api/auth/[...nextauth]/
-    ├── lib/                           # prisma.ts, auth.ts, discord.ts, permissions.ts
+    ├── lib/                           # prisma.ts, auth.ts, discord.ts, permissions.ts,
+    │                                  # permissionKeys.ts, permissionHierarchy.ts, roleCategories.ts
     ├── components/                    # Sidebar, SessionProviderWrapper
     └── package.json
 ```
@@ -75,18 +80,53 @@ uwrp-bot/
 
 Baza jest synchronizowana ze schematem przez **`prisma db push`**, nie przez `prisma migrate`. Powód: produkcja wystartowała z `db push`, więc nie ma w niej tabeli `_prisma_migrations` — pierwsze `migrate deploy` uznałoby wszystkie migracje z `prisma/migrations/` za niezastosowane i spróbowałoby wykonać `init` od zera na już istniejących tabelach. Folder `prisma/migrations/` jest więc historyczny i **nie jest** odpalany na produkcji; jednym źródłem prawdy jest `prisma/schema.prisma`.
 
-**Build Command serwisu bota** (tam, gdzie jest `DATABASE_URL`):
+**Build Command serwisu bota** (`uwrp-bot`, tam gdzie jest `DATABASE_URL`) — dokładnie tak, jak jest ustawiony i potwierdzony logiem builda:
 
 ```bash
-npm ci --include=dev && npm run prisma:generate && npm run prisma:push
+npm install && npx prisma generate --schema=../prisma/schema.prisma && npx prisma db push --schema=../prisma/schema.prisma
 ```
 
-- `--include=dev` jest konieczne, bo CLI `prisma` siedzi w `devDependencies` — bez tego przy `NODE_ENV=production` npm go nie zainstaluje i build padnie na „prisma: not found".
-- `prisma:push` = `prisma db push --schema=../prisma/schema.prisma`. Jest idempotentny: dodaje brakujące tabele/kolumny i nic nie robi, gdy baza już pasuje do schematu.
-- Celowo **bez** `--accept-data-loss`. Jeśli zmiana w schemacie wymagałaby usunięcia danych (np. skasowania kolumny albo tabeli), build zatrzyma się z błędem zamiast po cichu wyczyścić produkcję — wtedy decyzję podejmujesz ręcznie i świadomie.
-- `db push` odpalaj **tylko** w serwisie bota. Dashboard (`dashboard/`) współdzieli tę samą bazę i robi wyłącznie `prisma generate` — dwa serwisy pushujące schemat równolegle to wyścig o DDL.
+Dlaczego tak:
+
+- **`npx`, a nie `npm run`.** CLI `prisma` siedzi w `devDependencies`. Na Renderze `NODE_ENV=production`, więc `npm install` pomija pakiety deweloperskie — w `node_modules/.bin` nie ma binarki `prisma` i `npm run prisma:generate` padłby na `prisma: not found`. `npx` nie szuka w `node_modules/.bin`, tylko dociąga CLI z rejestru sam. (Alternatywa `npm install --include=dev && npm run …` też zadziała, ale instaluje cały tree deweloperski — `npx` jest lżejszy i nie zależy od skryptów w `package.json`.)
+- **`db push` jest idempotentny.** Dodaje brakujące tabele/kolumny i nie robi nic, gdy baza już pasuje do schematu, więc każdy kolejny deploy przechodzi bez błędu.
+- **Celowo bez `--accept-data-loss`.** Jeśli zmiana w schemacie wymagałaby usunięcia danych (np. skasowania kolumny albo tabeli), build zatrzyma się z błędem zamiast po cichu wyczyścić produkcję — wtedy decyzję podejmujesz ręcznie i świadomie.
+- **`db push` tylko w serwisie bota.** Dashboard (`dashboard/`) współdzieli tę samą bazę i robi **wyłącznie** `prisma generate` (jest w jego `postinstall`/`build`). Dwa serwisy pushujące schemat równolegle to wyścig o DDL.
+- **Nigdy nie dokładaj `prisma migrate deploy`** do builda ani startu — patrz akapit o `_prisma_migrations` wyżej.
+
+**Start Command:** ustaw na samo `npm start`. Na Renderze widnieje dziś `npm start && npm run deploy`, ale `npm start` (`node src/index.js`) blokuje proces, więc druga część nigdy się nie wykona — to martwy kod. `npm run deploy` istnieje jako osobny, **idempotentny** krok (rejestracja komend slash na serwerze guildowym, `PUT` pełnej listy, bezpieczne wielokrotne uruchomienie):
+
+```bash
+npm run deploy        # bot/src/deployCommands.js — tylko rejestruje komendy i kończy działanie
+```
+
+Możesz go odpalić ręcznie (lub jako osobny job) po zmianie komend; nie zastępuje startu bota i nie dotyka bazy. Zmian ustawień usługi na Renderze nie da się zrobić z kodu — trzeba ją wkleić w panelu.
 
 `prisma migrate dev` zostaje wyłącznie do eksperymentów lokalnych na osobnej bazie; nie ma ścieżki, którą jego wynik trafiłby na produkcję.
+
+### ⚠️ Uwaga operacyjna: `Kolo.lastActivityAt` po wdrożeniu kolumny
+
+Deploy z 2026-09-12 dodał kolumny `Kolo.panelMessageId`, `Kolo.lastActivityAt`, `Kolo.inactivityWarnedAt` i `GeneralConfig.koloInactivityDays`. `db push` nie ma skąd wziąć wartości historycznych, więc **po pierwszym pushu `lastActivityAt` jest `NULL` dla każdego istniejącego koła**.
+
+Efekt: `_checkActivityRequirement` w `bot/src/services/koloService.js` liczy bezczynność od momentu
+
+```js
+const since = kolo.lastActivityAt || kolo.createdAt;
+```
+
+czyli dla starych kół od daty **założenia**. Scheduler (`bot/src/scheduler/koloScheduler.js`, `CHECK_INTERVAL_MS` = 15 min) ostrzega każde aktywne koło starsze niż `GeneralConfig.koloInactivityDays` (domyślnie 30), a 72 h po ostrzeżeniu rozwiązuje je automatycznie. Innymi słowy: tuż po wdrożeniu koła założone dawno temu mogą dostać falę ostrzeżeń, mimo że są aktywne.
+
+Zanim włączyć scheduler po raz pierwszy (albo od razu po deployu), „uziemij" licznik jednym zapytaniem — traktujemy wszystkie istniejące koła jako aktywne na teraz:
+
+```sql
+UPDATE "Kolo" SET "lastActivityAt" = NOW() WHERE "lastActivityAt" IS NULL;
+```
+
+Warto też wyzerować ewentualne ostrzeżenia wysłane w międzyczasie:
+
+```sql
+UPDATE "Kolo" SET "inactivityWarnedAt" = NULL WHERE "inactivityWarnedAt" IS NOT NULL;
+```
 
 ## Wzorce projektowe zastosowane w kodzie
 
@@ -99,7 +139,49 @@ npm ci --include=dev && npm run prisma:generate && npm run prisma:push
 
 Role nie są hardkodowane po ID w kodzie bota — Dashboard zapisuje mapowanie `RoleBinding { discordRoleId, permissionKey }` w bazie, a `config/roles.js` tylko definiuje **klucze uprawnień** używane w kodzie (`MANAGE_EXAMS`, `MANAGE_SYLLABUS`, `MODERATE`, `MANAGE_DEANERY`, `DONATE_UNLIMITED_AI` itd.). Dzięki temu zmiana ID roli na serwerze nie wymaga zmiany kodu — tylko wpisu w Dashboardzie.
 
-Poziomy (od najwyższych uprawnień technicznych/administracyjnych do społeczności):
+### Rangi staffu — dziedziczenie (jedno powiązanie wystarczy)
+
+Rangi tworzą łańcuchy, w których **wyższa ranga dostaje wszystkie uprawnienia rang niższych**. W Dashboardzie wiążesz rolę Discorda z jedną rangą, a reszta wynika z hierarchii i z „grantu z urzędu" (`RANK_GRANTS`):
+
+```
+Holder Projektu      → Manager Projektu → Pomocnik Managera Projektu
+Główny Developer     → Developer        → Młodszy Developer
+Opiekun Administracji→ Starszy Administrator → Administrator → Młodszy Administrator
+                                             → Starszy Moderator → Moderator → Młodszy Moderator
+Support              → Trial Support        (osobny łańcuch — Support nie dziedziczy po Moderacji)
+Zarząd Projektu      (ranga samodzielna)
+```
+
+Uprawnienia granularne przypisane do rang (domyślnie, można je też nadać wybranej roli wprost):
+
+| Ranga | Dokłada |
+| --- | --- |
+| Młodszy Moderator | `TIMEOUT_MEMBERS`, `CLEAR_MESSAGES`, `MANAGE_THREADS`, `MANAGE_NICKNAMES`, `VIEW_AUDIT_LOG` |
+| Moderator | `KICK_MEMBERS` |
+| Starszy Moderator | `BAN_MEMBERS`, `MOVE_MEMBERS` |
+| Młodszy Administrator | `MANAGE_CHANNELS` |
+| Administrator | `MANAGE_ROLES` |
+| Support | `MANAGE_THREADS`, `VIEW_AUDIT_LOG`, `CLEAR_MESSAGES` (+ `REVIEW_APPLICATIONS`) |
+| Trial Support | `MANAGE_THREADS` |
+| Główny Developer | `MANAGE_ROLES` (+ `MANAGE_TECH`) |
+| Developer | `MANAGE_CHANNELS`, `MANAGE_THREADS` |
+| Młodszy Developer / Pomocnik Managera / Zarząd Projektu | `VIEW_AUDIT_LOG` |
+| Manager Projektu | `MANAGE_CHANNELS` |
+| Holder Projektu | `MANAGE_ROLES` (+ `MANAGE_PROJECT`) |
+
+Przykład: rola „• Starszy Moderator •" powiązana z kluczem `STARSZY_MODERATOR` daje jej posiadaczowi kick, ban, timeout, clear, wątki, pseudonimy, przenoszenie i podgląd audytu — bez dopisywania kolejnych powiązań.
+
+**Kompatybilność wstecz.** Stare klucze (`MODERATE`, `MANAGE_TECH`, `MANAGE_PROJECT`, `MANAGE_DEANERY`, `REVIEW_APPLICATIONS`) zostają i „rozszerzają się" na nowe: kto miał `MODERATE`, nadal może banować/kickować/czyścić. W drugą stronę już nie — rangi **nie** dostają automatycznie pełnego `MODERATE`, bo wtedy Młodszy Moderator odziedziczyłby przez niego bana i hierarchia przestałaby cokolwiek znaczyć. Sprawdzenia, które muszą działać w obu światach, pytają o kilka kluczy naraz (`KEY_SETS` w `config/roles.js`), np. `hasAnyPermission(member, KEY_SETS.MODERATION)` = `["MODERATE", "MLODSZY_MODERATOR"]`. Zasada przy wyborze rangi do sprawdzenia: **wpisz najniższą akceptowalną** — wyższe i tak ją dziedziczą.
+
+`DASHBOARD_ACCESS` celowo nie implikuje niczego: to jedyny klucz, który trzeba nadać wprost (raz, w bazie/seedzie), żeby w ogóle wejść do panelu.
+
+### Przegródki (role-separatory)
+
+Kategorie na serwerze głównym są oddzielone przegródkami o nazwie `•══════• Kategoria •══════•` (Development, Administracja, Moderacja, Support, Przydział, Holder, Manager, Zarząd Projektu, Bot). Są **wyłącznie wizualne**: nie mają uprawnień, nie są nadawane ludziom i **nigdy nie trafiają do `RoleBinding`** — Dashboard rozpoznaje je po nazwie (`isDividerRoleName`) i pomija w liście ról do powiązania, a akcja zapisu ma drugą linię obrony. Reprezentacja w kodzie: `STAFF_CATEGORIES` / `DIVIDER_ROLES` w `bot/src/config/roles.js` i `dashboard/lib/permissionHierarchy.ts`.
+
+> To **nie** jest system ról Kół Naukowych (`Kolo.roleIdDivider` na serwerze `KOLA_GUILD_ID`) — tamten żyje w `bot/src/services/koloService.js` i jest osobnym mechanizmem na osobnym serwerze.
+
+### Poziomy (od najwyższych uprawnień technicznych/administracyjnych do społeczności)
 1. Zarząd Projektu (Holder, Manager, ...)
 2. Administracja Techniczna (Development, Główny Developer)
 3. Administracja Serwera (Opiekun, Starszy Admin, Admin, Moderator, Support)
@@ -111,6 +193,10 @@ Poziomy (od najwyższych uprawnień technicznych/administracyjnych do społeczno
 9. Kadra Akademicka (Promotor, Adiunkt, Asystent, Lektor) — `MANAGE_EXAMS`, `MANAGE_SYLLABUS` dla przypisanego wydziału
 10. Wydziały — tagują `Character.facultyId`
 11. Społeczność (Starosta Roku, Student, Obywatel) — uprawnienia bazowe
+
+### Sync kluczy między botem a dashboardem
+
+`bot/src/config/roles.js` (JS) i `dashboard/lib/{permissionKeys,permissionHierarchy}.ts` (TS) to ręcznie utrzymywane kopie tego samego modelu. `bot/test/permissions.test.js` porównuje je wpis po wpisie (klucze, grupy UI, `RANK_HIERARCHY`, `RANK_GRANTS`, `RANK_LEGACY_GRANTS`, `LEGACY_COMPAT`, `STAFF_CATEGORIES`) i **failuje build testów**, gdy się rozjadą. Po zmianie w jednym miejscu popraw drugie i uruchom `cd bot && npm test`.
 
 ## Uwaga dot. modułu AI — WYŁĄCZNIE Hugging Face
 

@@ -7,7 +7,7 @@
 
 const { SlashCommandBuilder } = require("discord.js");
 const reactionRoleService = require("../../services/reactionRoleService");
-const { hasPermission } = require("../../config/roles");
+const { hasAnyPermission } = require("../../config/roles");
 const ui = require("../../utils/embeds");
 
 module.exports = {
@@ -23,9 +23,15 @@ module.exports = {
     .addSubcommand((s) => s.setName("grupy").setDescription("👥 | Lista dostępnych grup autoról")),
 
   async execute(interaction) {
-    if (!(await hasPermission(interaction.member, "MANAGE_REACTION_ROLES"))) {
+    // MANAGE_CHANNELS przychodzi z hierarchii (Młodszy Administrator+), więc
+    // administracja nie musi mieć osobnego wpisu RoleBinding.
+    if (!(await hasAnyPermission(interaction.member, ["MANAGE_REACTION_ROLES", "MANAGE_CHANNELS"]))) {
       return interaction.reply({
-        embeds: [ui.noPermission("Panele autoról wymagają uprawnienia **MANAGE_REACTION_ROLES**.")],
+        embeds: [
+          ui.noPermission(
+            "Panele autoról wymagają uprawnienia **MANAGE_REACTION_ROLES** albo **MANAGE_CHANNELS** (ranga: Młodszy Administrator lub wyższa)."
+          ),
+        ],
         ephemeral: true,
       });
     }
