@@ -71,6 +71,23 @@ uwrp-bot/
     └── package.json
 ```
 
+## Deploy (Render) — synchronizacja schematu bazy
+
+Baza jest synchronizowana ze schematem przez **`prisma db push`**, nie przez `prisma migrate`. Powód: produkcja wystartowała z `db push`, więc nie ma w niej tabeli `_prisma_migrations` — pierwsze `migrate deploy` uznałoby wszystkie migracje z `prisma/migrations/` za niezastosowane i spróbowałoby wykonać `init` od zera na już istniejących tabelach. Folder `prisma/migrations/` jest więc historyczny i **nie jest** odpalany na produkcji; jednym źródłem prawdy jest `prisma/schema.prisma`.
+
+**Build Command serwisu bota** (tam, gdzie jest `DATABASE_URL`):
+
+```bash
+npm ci --include=dev && npm run prisma:generate && npm run prisma:push
+```
+
+- `--include=dev` jest konieczne, bo CLI `prisma` siedzi w `devDependencies` — bez tego przy `NODE_ENV=production` npm go nie zainstaluje i build padnie na „prisma: not found".
+- `prisma:push` = `prisma db push --schema=../prisma/schema.prisma`. Jest idempotentny: dodaje brakujące tabele/kolumny i nic nie robi, gdy baza już pasuje do schematu.
+- Celowo **bez** `--accept-data-loss`. Jeśli zmiana w schemacie wymagałaby usunięcia danych (np. skasowania kolumny albo tabeli), build zatrzyma się z błędem zamiast po cichu wyczyścić produkcję — wtedy decyzję podejmujesz ręcznie i świadomie.
+- `db push` odpalaj **tylko** w serwisie bota. Dashboard (`dashboard/`) współdzieli tę samą bazę i robi wyłącznie `prisma generate` — dwa serwisy pushujące schemat równolegle to wyścig o DDL.
+
+`prisma migrate dev` zostaje wyłącznie do eksperymentów lokalnych na osobnej bazie; nie ma ścieżki, którą jego wynik trafiłby na produkcję.
+
 ## Wzorce projektowe zastosowane w kodzie
 
 - **Repository Pattern** — cała logika Prisma odizolowana od komend Discorda (łatwe testy, łatwa podmiana ORM).
